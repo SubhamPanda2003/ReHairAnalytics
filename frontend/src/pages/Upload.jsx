@@ -145,24 +145,29 @@ export default function UploadPage() {
   const [camView, setCamView] = useState(null);
   const [analyzing, setAnalyzing] = useState(false);
 
-  useEffect(() => {
-    (async () => {
-      try {
-        const res = await api.post("/sessions", { notes: "" });
-        setSessionId(res.data.id);
-      } catch (e) { toast.error("Could not start a session"); }
-    })();
-  }, []);
+  const ensureSession = async () => {
+    if (sessionId) return sessionId;
+    const res = await api.post("/sessions", { notes: "" });
+    setSessionId(res.data.id);
+    return res.data.id;
+  };
 
   const uploadFile = async (view, file) => {
-    if (!sessionId) return;
     const preview = URL.createObjectURL(file);
     setSlots((s) => ({ ...s, [view]: { preview, status: "uploading" } }));
+    let sid;
+    try {
+      sid = await ensureSession();
+    } catch (e) {
+      setSlots((s) => ({ ...s, [view]: { preview, status: "rejected", issues: ["Could not start a session"] } }));
+      toast.error("Could not start a session");
+      return;
+    }
     const fd = new FormData();
     fd.append("file", file);
     fd.append("view", view);
     try {
-      const res = await api.post(`/sessions/${sessionId}/upload`, fd, { headers: { "Content-Type": "multipart/form-data" } });
+      const res = await api.post(`/sessions/${sid}/upload`, fd, { headers: { "Content-Type": "multipart/form-data" } });
       if (res.data.rejected) {
         setSlots((s) => ({ ...s, [view]: { preview, status: "rejected", issues: res.data.issues, quality: res.data.quality_score } }));
         toast.warning(`${view} rejected — quality ${res.data.quality_score}`);

@@ -48,9 +48,13 @@ async def analyze_quality(image_b64: str, view: str, session_id: str) -> dict:
         "Respond ONLY with strict JSON."
     )
     prompt = (
-        f"This is a '{view}' view scalp/hair photo submitted for hair-growth tracking. "
-        "Assess photographic quality across: lighting, blur/sharpness, face/head angle, distance, occlusion, "
-        "resolution, and hair visibility. "
+        f"This is a '{view}' view photo submitted for personal hair-growth tracking. "
+        "Judge only whether the photo is usable for consistent measurement — be lenient. "
+        "A photo is acceptable (quality >= 60) if hair is visible and reasonably in focus and lit, "
+        "even if it is a casual selfie rather than a clinical top-of-scalp shot. "
+        "Only score below 60 when the photo is genuinely unusable: heavy blur, extreme darkness, "
+        "no hair visible at all, or wrong subject. "
+        "Consider lighting, blur/sharpness, angle, distance, occlusion, resolution and hair visibility. "
         "Return strict JSON: {\"quality\": <0-100 int>, \"issues\": [<short strings>], \"retry\": <bool>}. "
         "Set retry=true only if quality < 60. Keep issues concise (max 4)."
     )
