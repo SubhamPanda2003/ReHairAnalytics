@@ -1,0 +1,136 @@
+import React, { useState, useEffect } from "react";
+import { useNavigate } from "react-router-dom";
+import { api, fileUrl } from "@/lib/api";
+import { useAuth } from "@/context/AuthContext";
+import Navbar from "@/components/Navbar";
+import { Button } from "@/components/ui/button";
+import { Switch } from "@/components/ui/switch";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import {
+  AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription,
+  AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger,
+} from "@/components/ui/alert-dialog";
+import { toast } from "sonner";
+import { Moon, Download, ImageDown, Trash2, ShieldCheck, Ruler, Loader2 } from "lucide-react";
+
+export default function Settings() {
+  const navigate = useNavigate();
+  const { user, logout } = useAuth();
+  const [dark, setDark] = useState(document.documentElement.classList.contains("dark"));
+  const [units, setUnits] = useState(localStorage.getItem("units") || "metric");
+  const [busy, setBusy] = useState(false);
+
+  useEffect(() => {
+    document.documentElement.classList.toggle("dark", dark);
+    localStorage.setItem("theme", dark ? "dark" : "light");
+  }, [dark]);
+
+  const exportData = async () => {
+    try {
+      const res = await api.get("/export");
+      const blob = new Blob([JSON.stringify(res.data, null, 2)], { type: "application/json" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url; a.download = "rehairanalytics-export.json"; a.click();
+      URL.revokeObjectURL(url);
+      toast.success("Data exported");
+    } catch (e) { toast.error("Export failed"); }
+  };
+
+  const downloadImages = async () => {
+    setBusy(true);
+    try {
+      const res = await api.get("/export");
+      const imgs = res.data.images || [];
+      if (!imgs.length) { toast.info("No images to download"); setBusy(false); return; }
+      for (const img of imgs) {
+        const r = await api.get(`/files/${img.storage_path}`, { responseType: "blob" });
+        const url = URL.createObjectURL(r.data);
+        const a = document.createElement("a");
+        a.href = url; a.download = `${img.view}_${img.id.slice(0, 6)}.jpg`; a.click();
+        URL.revokeObjectURL(url);
+      }
+      toast.success(`Downloaded ${imgs.length} images`);
+    } catch (e) { toast.error("Download failed"); }
+    setBusy(false);
+  };
+
+  const deleteAccount = async () => {
+    try {
+      await api.delete("/account");
+      toast.success("Account deleted");
+      logout();
+    } catch (e) { toast.error("Delete failed"); }
+  };
+
+  const Row = ({ icon: Icon, title, desc, children, testId }) => (
+    <div className="flex items-center justify-between gap-4 py-5 border-b border-border last:border-0" data-testid={testId}>
+      <div className="flex items-start gap-3">
+        <div className="w-9 h-9 rounded-xl bg-accent flex items-center justify-center shrink-0"><Icon className="w-4 h-4 text-accent-foreground" /></div>
+        <div><p className="font-medium">{title}</p><p className="text-sm text-muted-foreground">{desc}</p></div>
+      </div>
+      <div className="shrink-0">{children}</div>
+    </div>
+  );
+
+  return (
+    <div className="min-h-screen bg-background" data-testid="settings-page">
+      <Navbar />
+      <main className="max-w-3xl mx-auto px-5 md:px-8 py-8">
+        <h1 className="font-heading text-3xl font-bold tracking-tight mb-2">Settings</h1>
+        <p className="text-muted-foreground mb-8">{user?.name} · {user?.email}</p>
+
+        <div className="rounded-2xl border border-border bg-card px-6 mb-6">
+          <Row icon={Moon} title="Dark mode" desc="Switch to the clinical night view." testId="setting-dark">
+            <Switch checked={dark} onCheckedChange={setDark} data-testid="dark-mode-switch" />
+          </Row>
+          <Row icon={Ruler} title="Units" desc="Display preference for measurements." testId="setting-units">
+            <Select value={units} onValueChange={(v) => { setUnits(v); localStorage.setItem("units", v); }}>
+              <SelectTrigger className="w-32 rounded-xl" data-testid="units-select"><SelectValue /></SelectTrigger>
+              <SelectContent><SelectItem value="metric">Metric</SelectItem><SelectItem value="imperial">Imperial</SelectItem></SelectContent>
+            </Select>
+          </Row>
+        </div>
+
+        <div className="rounded-2xl border border-border bg-card px-6 mb-6">
+          <Row icon={Download} title="Export data" desc="Download all your sessions & analysis as JSON." testId="setting-export">
+            <Button variant="outline" className="rounded-full" onClick={exportData} data-testid="export-btn">Export</Button>
+          </Row>
+          <Row icon={ImageDown} title="Download images" desc="Save every uploaded photo to your device." testId="setting-images">
+            <Button variant="outline" className="rounded-full" onClick={downloadImages} disabled={busy} data-testid="download-images-btn">
+              {busy ? <Loader2 className="w-4 h-4 animate-spin" /> : "Download"}
+            </Button>
+          </Row>
+        </div>
+
+        <div className="rounded-2xl border border-border bg-card px-6 mb-6">
+          <Row icon={ShieldCheck} title="Privacy" desc="Your photos are private and used only for your measurements." testId="setting-privacy">
+            <span className="text-xs text-muted-foreground">Private</span>
+          </Row>
+        </div>
+
+        <div className="rounded-2xl border border-destructive/30 bg-card px-6">
+          <Row icon={Trash2} title="Delete account" desc="Permanently remove your account, photos and data." testId="setting-delete">
+            <AlertDialog>
+              <AlertDialogTrigger asChild>
+                <Button variant="destructive" className="rounded-full" data-testid="delete-account-btn">Delete</Button>
+              </AlertDialogTrigger>
+              <AlertDialogContent className="rounded-3xl">
+                <AlertDialogHeader>
+                  <AlertDialogTitle>Delete your account?</AlertDialogTitle>
+                  <AlertDialogDescription>This permanently deletes your profile, all scans, images and analysis. This cannot be undone.</AlertDialogDescription>
+                </AlertDialogHeader>
+                <AlertDialogFooter>
+                  <AlertDialogCancel className="rounded-full" data-testid="delete-cancel">Cancel</AlertDialogCancel>
+                  <AlertDialogAction onClick={deleteAccount} className="rounded-full bg-destructive text-destructive-foreground hover:bg-destructive/90" data-testid="delete-confirm">Delete permanently</AlertDialogAction>
+                </AlertDialogFooter>
+              </AlertDialogContent>
+            </AlertDialog>
+          </Row>
+        </div>
+
+        <p className="text-xs text-muted-foreground text-center mt-8">ReHairAnalytics provides objective photographic measurements only and does not diagnose hair loss or offer medical advice.</p>
+      </main>
+    </div>
+  );
+}

@@ -1,88 +1,440 @@
-from fastapi import FastAPI, APIRouter
+import os
+import uuid
+import logging
+from pathlib import Path
+from datetime import datetime, timezone, timedelta
+from typing import List, Optional
+
+from fastapi import FastAPI, APIRouter, UploadFile, File, Form, HTTPException, Header, Request, Response, Query
+from fastapi.responses import StreamingResponse
 from dotenv import load_dotenv
 from starlette.middleware.cors import CORSMiddleware
 from motor.motor_asyncio import AsyncIOMotorClient
-import os
-import logging
-from pathlib import Path
-from pydantic import BaseModel, Field, ConfigDict
-from typing import List
-import uuid
-from datetime import datetime, timezone
-
+from pydantic import BaseModel
+import requests as http_requests
+import io
 
 ROOT_DIR = Path(__file__).parent
-load_dotenv(ROOT_DIR / '.env')
+load_dotenv(ROOT_DIR / ".env")
 
-# MongoDB connection
-mongo_url = os.environ['MONGO_URL']
+import storage as store
+import image_utils
+import ai_service
+
+mongo_url = os.environ["MONGO_URL"]
 client = AsyncIOMotorClient(mongo_url)
-db = client[os.environ['DB_NAME']]
+db = client[os.environ["DB_NAME"]]
 
-# Create the main app without a prefix
-app = FastAPI()
-
-# Create a router with the /api prefix
+app = FastAPI(title="ReHairAnalytics API")
 api_router = APIRouter(prefix="/api")
 
+logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s")
+logger = logging.getLogger(__name__)
 
-# Define Models
-class StatusCheck(BaseModel):
-    model_config = ConfigDict(extra="ignore")  # Ignore MongoDB's _id field
-    
-    id: str = Field(default_factory=lambda: str(uuid.uuid4()))
-    client_name: str
-    timestamp: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+EMERGENT_SESSION_URL = "https://demobackend.emergentagent.com/auth/v1/env/oauth/session-data"
+MAX_SIZE = 10 * 1024 * 1024
+ALLOWED_EXT = {"jpg", "jpeg", "png"}
+VIEWS = {"front", "left", "right", "top", "back"}
 
-class StatusCheckCreate(BaseModel):
-    client_name: str
 
-# Add your routes to the router instead of directly to app
+# ---------------- Auth helpers ----------------
+async def get_current_user(request: Request, authorization: Optional[str] = None):
+    token = request.cookies.get("session_token")
+    if not token and authorization and authorization.startswith("Bearer "):
+        token = authorization.split(" ", 1)[1]
+    if not token:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+    session = await db.user_sessions.find_one({"session_token": token}, {"_id": 0})
+    if not session:
+        raise HTTPException(status_code=401, detail="Invalid session")
+    expires_at = session["expires_at"]
+    if isinstance(expires_at, str):
+        expires_at = datetime.fromisoformat(expires_at)
+    if expires_at.tzinfo is None:
+        expires_at = expires_at.replace(tzinfo=timezone.utc)
+    if expires_at < datetime.now(timezone.utc):
+        raise HTTPException(status_code=401, detail="Session expired")
+    user = await db.users.find_one({"user_id": session["user_id"]}, {"_id": 0})
+    if not user:
+        raise HTTPException(status_code=401, detail="User not found")
+    return user
+
+
+# ---------------- Models ----------------
+class SessionExchange(BaseModel):
+    session_id: str
+
+
+class ProfileIn(BaseModel):
+    age: Optional[int] = None
+    gender: Optional[str] = None
+    hair_type: Optional[str] = None
+    goals: Optional[str] = None
+
+
+class SessionIn(BaseModel):
+    notes: Optional[str] = ""
+
+
+# ---------------- Auth routes ----------------
+@api_router.post("/auth/session")
+async def auth_session(body: SessionExchange, response: Response):
+    resp = http_requests.get(EMERGENT_SESSION_URL, headers={"X-Session-ID": body.session_id}, timeout=30)
+    if resp.status_code != 200:
+        raise HTTPException(status_code=401, detail="Invalid session id")
+    data = resp.json()
+    email = data["email"]
+    user = await db.users.find_one({"email": email}, {"_id": 0})
+    if not user:
+        user_id = f"user_{uuid.uuid4().hex[:12]}"
+        user = {
+            "user_id": user_id,
+            "email": email,
+            "name": data.get("name", ""),
+            "picture": data.get("picture", ""),
+            "created_at": datetime.now(timezone.utc).isoformat(),
+        }
+        await db.users.insert_one(dict(user))
+    else:
+        await db.users.update_one({"email": email}, {"$set": {"name": data.get("name", user.get("name", "")), "picture": data.get("picture", user.get("picture", ""))}})
+
+    session_token = data.get("session_token") or uuid.uuid4().hex
+    expires = datetime.now(timezone.utc) + timedelta(days=7)
+    await db.user_sessions.insert_one({
+        "user_id": user["user_id"],
+        "session_token": session_token,
+        "expires_at": expires.isoformat(),
+        "created_at": datetime.now(timezone.utc).isoformat(),
+    })
+    response.set_cookie(
+        key="session_token", value=session_token, httponly=True, secure=True,
+        samesite="none", path="/", max_age=7 * 24 * 60 * 60,
+    )
+    user.pop("_id", None)
+    return {"user": user}
+
+
+@api_router.get("/auth/me")
+async def auth_me(request: Request, authorization: Optional[str] = Header(None)):
+    user = await get_current_user(request, authorization)
+    profile = await db.profiles.find_one({"user_id": user["user_id"]}, {"_id": 0})
+    user["profile"] = profile
+    return user
+
+
+@api_router.post("/auth/logout")
+async def auth_logout(request: Request, response: Response, authorization: Optional[str] = Header(None)):
+    token = request.cookies.get("session_token") or (authorization.split(" ", 1)[1] if authorization and authorization.startswith("Bearer ") else None)
+    if token:
+        await db.user_sessions.delete_many({"session_token": token})
+    response.delete_cookie("session_token", path="/")
+    return {"ok": True}
+
+
+# ---------------- Profile ----------------
+@api_router.get("/profile")
+async def get_profile(request: Request, authorization: Optional[str] = Header(None)):
+    user = await get_current_user(request, authorization)
+    profile = await db.profiles.find_one({"user_id": user["user_id"]}, {"_id": 0})
+    return profile or {}
+
+
+@api_router.post("/profile")
+async def upsert_profile(body: ProfileIn, request: Request, authorization: Optional[str] = Header(None)):
+    user = await get_current_user(request, authorization)
+    doc = body.model_dump()
+    doc["user_id"] = user["user_id"]
+    existing = await db.profiles.find_one({"user_id": user["user_id"]}, {"_id": 0})
+    if existing:
+        await db.profiles.update_one({"user_id": user["user_id"]}, {"$set": doc})
+    else:
+        doc["id"] = str(uuid.uuid4())
+        doc["created_at"] = datetime.now(timezone.utc).isoformat()
+        await db.profiles.insert_one(dict(doc))
+    doc.pop("_id", None)
+    return doc
+
+
+# ---------------- Tracking sessions ----------------
+@api_router.post("/sessions")
+async def create_session(body: SessionIn, request: Request, authorization: Optional[str] = Header(None)):
+    user = await get_current_user(request, authorization)
+    count = await db.tracking_sessions.count_documents({"user_id": user["user_id"]})
+    doc = {
+        "id": str(uuid.uuid4()),
+        "user_id": user["user_id"],
+        "week_number": count,
+        "date": datetime.now(timezone.utc).isoformat(),
+        "notes": body.notes or "",
+        "analyzed": False,
+    }
+    await db.tracking_sessions.insert_one(dict(doc))
+    doc.pop("_id", None)
+    return doc
+
+
+@api_router.get("/sessions")
+async def list_sessions(request: Request, authorization: Optional[str] = Header(None)):
+    user = await get_current_user(request, authorization)
+    sessions = await db.tracking_sessions.find({"user_id": user["user_id"]}, {"_id": 0}).sort("week_number", 1).to_list(1000)
+    for s in sessions:
+        s["images"] = await db.images.find({"tracking_session_id": s["id"]}, {"_id": 0}).to_list(20)
+        s["analysis"] = await db.analysis.find_one({"tracking_session_id": s["id"]}, {"_id": 0})
+    return sessions
+
+
+@api_router.get("/sessions/{session_id}")
+async def get_session(session_id: str, request: Request, authorization: Optional[str] = Header(None)):
+    user = await get_current_user(request, authorization)
+    s = await db.tracking_sessions.find_one({"id": session_id, "user_id": user["user_id"]}, {"_id": 0})
+    if not s:
+        raise HTTPException(status_code=404, detail="Session not found")
+    s["images"] = await db.images.find({"tracking_session_id": session_id}, {"_id": 0}).to_list(20)
+    s["analysis"] = await db.analysis.find_one({"tracking_session_id": session_id}, {"_id": 0})
+    # comparisons
+    all_sessions = await db.tracking_sessions.find({"user_id": user["user_id"]}, {"_id": 0}).sort("week_number", 1).to_list(1000)
+    prev = None
+    baseline = None
+    if all_sessions:
+        baseline_id = all_sessions[0]["id"]
+        baseline = await db.analysis.find_one({"tracking_session_id": baseline_id}, {"_id": 0})
+        idx = next((i for i, x in enumerate(all_sessions) if x["id"] == session_id), 0)
+        if idx > 0:
+            prev = await db.analysis.find_one({"tracking_session_id": all_sessions[idx - 1]["id"]}, {"_id": 0})
+    s["previous_analysis"] = prev
+    s["baseline_analysis"] = baseline if (baseline and baseline.get("tracking_session_id") != session_id) else None
+    return s
+
+
+@api_router.post("/sessions/{session_id}/upload")
+async def upload_image(session_id: str, request: Request, file: UploadFile = File(...), view: str = Form(...), authorization: Optional[str] = Header(None)):
+    user = await get_current_user(request, authorization)
+    s = await db.tracking_sessions.find_one({"id": session_id, "user_id": user["user_id"]}, {"_id": 0})
+    if not s:
+        raise HTTPException(status_code=404, detail="Session not found")
+    if view not in VIEWS:
+        raise HTTPException(status_code=400, detail="Invalid view")
+    ext = (file.filename or "").split(".")[-1].lower()
+    if ext not in ALLOWED_EXT:
+        raise HTTPException(status_code=400, detail="Only jpg, jpeg, png allowed")
+    raw = await file.read()
+    if len(raw) > MAX_SIZE:
+        raise HTTPException(status_code=400, detail="Max size 10MB")
+
+    processed, ctype = image_utils.process_image(raw)
+    thumb = image_utils.make_thumbnail(processed)
+    b64 = image_utils.to_base64_jpeg(processed)
+
+    quality = await ai_service.analyze_quality(b64, view, session_id)
+    if quality["quality"] < 60:
+        return {"rejected": True, "quality_score": quality["quality"], "issues": quality["issues"], "retry": True}
+
+    img_id = str(uuid.uuid4())
+    base_path = f"{store.APP_NAME}/uploads/{user['user_id']}/{img_id}"
+    img_path = f"{base_path}.jpg"
+    thumb_path = f"{base_path}_thumb.jpg"
+    r1 = store.put_object(img_path, processed, ctype)
+    store.put_object(thumb_path, thumb, "image/jpeg")
+
+    # remove existing image for this view in this session
+    await db.images.delete_many({"tracking_session_id": session_id, "view": view})
+
+    doc = {
+        "id": img_id,
+        "tracking_session_id": session_id,
+        "user_id": user["user_id"],
+        "view": view,
+        "storage_path": r1["path"],
+        "thumb_path": thumb_path,
+        "quality_score": quality["quality"],
+        "quality_issues": quality["issues"],
+        "created_at": datetime.now(timezone.utc).isoformat(),
+    }
+    await db.images.insert_one(dict(doc))
+    doc.pop("_id", None)
+    return {"rejected": False, **doc}
+
+
+@api_router.post("/sessions/{session_id}/analyze")
+async def analyze_session(session_id: str, request: Request, authorization: Optional[str] = Header(None)):
+    user = await get_current_user(request, authorization)
+    s = await db.tracking_sessions.find_one({"id": session_id, "user_id": user["user_id"]}, {"_id": 0})
+    if not s:
+        raise HTTPException(status_code=404, detail="Session not found")
+    images = await db.images.find({"tracking_session_id": session_id}, {"_id": 0}).to_list(20)
+    if not images:
+        raise HTTPException(status_code=400, detail="No images uploaded for this session")
+
+    # pick primary image: prefer top, then front
+    primary = next((i for i in images if i["view"] == "top"), None) or next((i for i in images if i["view"] == "front"), None) or images[0]
+    data, _ = store.get_object(primary["storage_path"])
+    b64 = image_utils.to_base64_jpeg(data)
+    metrics = await ai_service.analyze_metrics(b64, primary["view"], session_id)
+
+    # comparisons
+    all_sessions = await db.tracking_sessions.find({"user_id": user["user_id"]}, {"_id": 0}).sort("week_number", 1).to_list(1000)
+    baseline_id = all_sessions[0]["id"] if all_sessions else session_id
+    baseline = await db.analysis.find_one({"tracking_session_id": baseline_id}, {"_id": 0})
+    idx = next((i for i, x in enumerate(all_sessions) if x["id"] == session_id), 0)
+    previous = None
+    if idx > 0:
+        previous = await db.analysis.find_one({"tracking_session_id": all_sessions[idx - 1]["id"]}, {"_id": 0})
+
+    summary = await ai_service.generate_summary(metrics, previous or {}, baseline or {}, session_id)
+
+    avg_quality = int(sum(i["quality_score"] for i in images) / len(images))
+    doc = {
+        "id": str(uuid.uuid4()),
+        "tracking_session_id": session_id,
+        "user_id": user["user_id"],
+        **metrics,
+        "quality_score": avg_quality,
+        "ai_summary": summary,
+        "created_at": datetime.now(timezone.utc).isoformat(),
+    }
+    await db.analysis.delete_many({"tracking_session_id": session_id})
+    await db.analysis.insert_one(dict(doc))
+    await db.tracking_sessions.update_one({"id": session_id}, {"$set": {"analyzed": True}})
+    doc.pop("_id", None)
+
+    def deltas(cur, ref):
+        if not ref:
+            return None
+        return {
+            "density": round(cur["density_score"] - ref["density_score"], 1),
+            "coverage": round(cur["coverage_score"] - ref["coverage_score"], 1),
+            "hairline": round(cur["hairline_score"] - ref["hairline_score"], 1),
+            "overall": round(cur["overall_score"] - ref["overall_score"], 1),
+        }
+
+    return {
+        "analysis": doc,
+        "vs_previous": deltas(metrics, previous),
+        "vs_baseline": deltas(metrics, baseline) if (baseline and baseline.get("tracking_session_id") != session_id) else None,
+    }
+
+
+# ---------------- Timeline & Progress ----------------
+@api_router.get("/timeline")
+async def timeline(request: Request, authorization: Optional[str] = Header(None)):
+    user = await get_current_user(request, authorization)
+    sessions = await db.tracking_sessions.find({"user_id": user["user_id"]}, {"_id": 0}).sort("week_number", 1).to_list(1000)
+    for s in sessions:
+        s["images"] = await db.images.find({"tracking_session_id": s["id"]}, {"_id": 0}).to_list(20)
+        s["analysis"] = await db.analysis.find_one({"tracking_session_id": s["id"]}, {"_id": 0})
+    return sessions
+
+
+@api_router.get("/progress")
+async def progress(request: Request, authorization: Optional[str] = Header(None)):
+    user = await get_current_user(request, authorization)
+    sessions = await db.tracking_sessions.find({"user_id": user["user_id"]}, {"_id": 0}).sort("week_number", 1).to_list(1000)
+    points = []
+    for s in sessions:
+        a = await db.analysis.find_one({"tracking_session_id": s["id"]}, {"_id": 0})
+        if a:
+            points.append({
+                "week": s["week_number"],
+                "label": f"Week {s['week_number']}",
+                "date": s["date"],
+                "density": a["density_score"],
+                "coverage": a["coverage_score"],
+                "hairline": a["hairline_score"],
+                "quality": a.get("quality_score", 0),
+                "overall": a["overall_score"],
+            })
+    latest = points[-1] if points else None
+    baseline = points[0] if points else None
+    streak = len(sessions)
+    est_progress = None
+    if latest and baseline and latest != baseline:
+        est_progress = {
+            "density": round(latest["density"] - baseline["density"], 1),
+            "coverage": round(latest["coverage"] - baseline["coverage"], 1),
+            "hairline": round(latest["hairline"] - baseline["hairline"], 1),
+            "overall": round(latest["overall"] - baseline["overall"], 1),
+        }
+    return {
+        "points": points,
+        "latest": latest,
+        "baseline": baseline,
+        "streak": streak,
+        "estimated_progress": est_progress,
+        "total_uploads": await db.images.count_documents({"user_id": user["user_id"]}),
+    }
+
+
+# ---------------- Files ----------------
+@api_router.get("/files/{path:path}")
+async def download_file(path: str, request: Request, authorization: Optional[str] = Header(None), auth: Optional[str] = Query(None)):
+    try:
+        await get_current_user(request, authorization or (f"Bearer {auth}" if auth else None))
+    except HTTPException:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+    record = await db.images.find_one({"$or": [{"storage_path": path}, {"thumb_path": path}]}, {"_id": 0})
+    if not record:
+        raise HTTPException(status_code=404, detail="File not found")
+    data, ctype = store.get_object(path)
+    return StreamingResponse(io.BytesIO(data), media_type=ctype)
+
+
+# ---------------- Export & Delete ----------------
+@api_router.get("/export")
+async def export_data(request: Request, authorization: Optional[str] = Header(None)):
+    user = await get_current_user(request, authorization)
+    profile = await db.profiles.find_one({"user_id": user["user_id"]}, {"_id": 0})
+    sessions = await db.tracking_sessions.find({"user_id": user["user_id"]}, {"_id": 0}).to_list(1000)
+    images = await db.images.find({"user_id": user["user_id"]}, {"_id": 0}).to_list(1000)
+    analysis = await db.analysis.find({"user_id": user["user_id"]}, {"_id": 0}).to_list(1000)
+    return {
+        "exported_at": datetime.now(timezone.utc).isoformat(),
+        "user": {"name": user.get("name"), "email": user.get("email")},
+        "profile": profile,
+        "tracking_sessions": sessions,
+        "images": images,
+        "analysis": analysis,
+    }
+
+
+@api_router.delete("/account")
+async def delete_account(request: Request, response: Response, authorization: Optional[str] = Header(None)):
+    user = await get_current_user(request, authorization)
+    uid = user["user_id"]
+    await db.images.update_many({"user_id": uid}, {"$set": {"is_deleted": True}})
+    await db.images.delete_many({"user_id": uid})
+    await db.analysis.delete_many({"user_id": uid})
+    await db.tracking_sessions.delete_many({"user_id": uid})
+    await db.profiles.delete_many({"user_id": uid})
+    await db.user_sessions.delete_many({"user_id": uid})
+    await db.users.delete_many({"user_id": uid})
+    response.delete_cookie("session_token", path="/")
+    return {"deleted": True}
+
+
 @api_router.get("/")
 async def root():
-    return {"message": "Hello World"}
+    return {"message": "ReHairAnalytics API", "status": "ok"}
 
-@api_router.post("/status", response_model=StatusCheck)
-async def create_status_check(input: StatusCheckCreate):
-    status_dict = input.model_dump()
-    status_obj = StatusCheck(**status_dict)
-    
-    # Convert to dict and serialize datetime to ISO string for MongoDB
-    doc = status_obj.model_dump()
-    doc['timestamp'] = doc['timestamp'].isoformat()
-    
-    _ = await db.status_checks.insert_one(doc)
-    return status_obj
 
-@api_router.get("/status", response_model=List[StatusCheck])
-async def get_status_checks():
-    # Exclude MongoDB's _id field from the query results
-    status_checks = await db.status_checks.find({}, {"_id": 0}).to_list(1000)
-    
-    # Convert ISO string timestamps back to datetime objects
-    for check in status_checks:
-        if isinstance(check['timestamp'], str):
-            check['timestamp'] = datetime.fromisoformat(check['timestamp'])
-    
-    return status_checks
-
-# Include the router in the main app
 app.include_router(api_router)
 
 app.add_middleware(
     CORSMiddleware,
     allow_credentials=True,
-    allow_origins=os.environ.get('CORS_ORIGINS', '*').split(','),
+    allow_origins=os.environ.get("CORS_ORIGINS", "*").split(","),
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
-# Configure logging
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
-)
-logger = logging.getLogger(__name__)
+
+@app.on_event("startup")
+async def startup():
+    try:
+        store.init_storage()
+        logger.info("Storage initialized")
+    except Exception as e:
+        logger.error(f"Storage init failed: {e}")
+
 
 @app.on_event("shutdown")
 async def shutdown_db_client():
