@@ -1,0 +1,128 @@
+{
+  "project_name": "ReHairAnalytics (HairTrack AI)",
+  "theme_strategy": {
+    "default": "light",
+    "rationale": "Health and wellness apps benefit from bright, clean, organic aesthetics to build trust and optimism. A dark mode toggle is available in Settings, leveraging deep obsidian and high-end glassmorphism for a premium 'clinical' night view."
+  },
+  "typography": {
+    "headings": {
+      "font": "Manrope, sans-serif",
+      "style": "Rounded Humanist Sans for a friendly yet clinical tone. Tightly tracked (tracking-tight) for large sizes.",
+      "scales": {
+        "h1": "text-4xl sm:text-5xl lg:text-6xl tracking-tighter leading-none font-bold",
+        "h2": "text-2xl sm:text-3xl lg:text-4xl tracking-tight font-semibold",
+        "h3": "text-xl sm:text-2xl font-medium",
+        "h4": "text-lg sm:text-xl font-medium"
+      }
+    },
+    "body": {
+      "font": "Inter, sans-serif",
+      "style": "Clean geometric sans for maximum readability in data-heavy dashboard views.",
+      "scales": {
+        "base": "text-base leading-relaxed text-stone-600 dark:text-stone-300",
+        "small": "text-sm text-stone-500",
+        "labels": "text-xs uppercase tracking-[0.2em] font-semibold text-stone-400"
+      }
+    },
+    "rules": [
+      "Inter is strictly BANNED for headings. Use Manrope.",
+      "Do not jump more than 2 Tailwind steps between headings and subheadings."
+    ]
+  },
+  "colors": {
+    "archetype": "Organic & Earthy + Crystal Glass (Apple Variant)",
+    "light_mode": {
+      "background": "#F9F9F8", 
+      "surface": "#FFFFFF",
+      "text_primary": "#1A1A1A",
+      "text_secondary": "#6B7A8F",
+      "accent_primary": "#8BA888", 
+      "accent_secondary": "#A9B5DF", 
+      "border": "#E5E5E3"
+    },
+    "dark_mode": {
+      "background": "#0A0A0A",
+      "surface": "#141414",
+      "text_primary": "#F2F2F2",
+      "text_secondary": "#A1A1AA",
+      "accent_primary": "#8BA888",
+      "accent_secondary": "#8294C4",
+      "border": "#27272A"
+    },
+    "rules": [
+      "No full-screen gradients. Use subtle background blurs or solid colors.",
+      "Never use pure #000000 or #808080. Greys must be tinted.",
+      "BANNED COLOR: Teal green/blue (#1B93A4) for dashboards. BANNED COLOR for AI: #7351B7.",
+      "Ensure minimum 4.5:1 contrast ratio for normal text."
+    ]
+  },
+  "surfaces_and_micro_themes": {
+    "headers_nav": "Glassmorphism (The 'Crystal' Variant). Light mode: bg-white/70 backdrop-blur-xl border-b border-white/40 shadow-sm. Never fully transparent.",
+    "dashboard_cards": "Flat background with 1px subtle border, rounded-2xl. Soft ambient shadow on hover (-translate-y-1 shadow-lg).",
+    "photo_upload_zone": "Neumorphism mix. Dashed 2px border, bg-stone-50, inside a rounded-3xl container with generous p-8 padding.",
+    "ai_results_card": "The 'Tracing Beam' look. A glowing border effect (using Framer Motion or mask-image) to signify AI analysis in progress, fading to a clean solid card once complete."
+  },
+  "layouts_and_grids": {
+    "marketing_pages": "Mode A: 'Tetris' Grid. Asymmetrical grid-cols-12 with wide gap-8 to gap-12. Overlapping text and image sections with generous padding (p-16 to p-32).",
+    "dashboard": "Mode B: High Density Grid. grid-cols-1 md:grid-cols-4. gap-6. Summary metrics take col-span-1, main charts take col-span-3.",
+    "spacing_system": "Generous spacing. Use p-6 or p-8 inside cards to avoid text collision with borders.",
+    "alignment": "Left-align paragraphs, inputs, and dense content. Center only if it improves visual rhythm (like the landing page hero)."
+  },
+  "components": {
+    "forms_and_inputs": "Shadcn/UI heavily customized. Use soft radii (rounded-xl) and 1px borders. Never use native inputs.",
+    "buttons": "Pill-shaped (rounded-full) or smooth rounded-xl. Explicit hover states (e.g., hover:bg-stone-800 hover:text-white).",
+    "toasts": "Sonner (from /app/src/components/ui/sonner.tsx). Positioned bottom-right.",
+    "charts": "Shadcn chart components or Recharts. Focus on modularity: high-level number -> comparative annotation -> minimal chart.",
+    "photo_alignment_overlay": "Use SVG paths overlaid on the camera feed/image preview with opacity-50 for silhouette guidance.",
+    "tabs": "Shadcn tabs, but remove fixed height (h-9) -> use h-auto to prevent cutoff."
+  },
+  "motion_and_interactions": {
+    "transitions": "Specific transitions only. NO 'transition: all'. Example: transition-transform duration-200 ease-out.",
+    "hover_states": "All interactive elements need micro-animations (scale up/down, color shift).",
+    "page_load": "Framer Motion staggered entrances for dashboard grid items (delay by 0.05s per item).",
+    "accessibility": "Respect prefers-reduced-motion. Add aria-hidden='true' to purely decorative SVG overlays."
+  },
+  "media_and_images": {
+    "image_urls": {
+      "hero_background": {
+        "url": "https://images.unsplash.com/photo-1588345921523-c2dcdb7f1dcd?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NjA1OTV8MHwxfHNlYXJjaHwxfHxhYnN0cmFjdCUyMHNvZnQlMjB3aGl0ZSUyMGdyYWRpZW50JTIwYmx1cnxlbnwwfHx8fDE3ODU5NTQ5NjB8MA&ixlib=rb-4.1.0&q=85",
+        "description": "Abstract soft white gradient blur. Use as landing page background behind text.",
+        "category": "Marketing/Hero"
+      },
+      "healthy_hair_close_up": {
+        "url": "https://images.unsplash.com/photo-1560264641-1b5191cc63e2?crop=entropy&cs=srgb&fm=jpg&ixid=M3w3NDQ2NDF8MHwxfHNlYXJjaHwxfHxoZWFsdGh5JTIwaGFpciUyMGNsb3NlJTIwdXB8ZW58MHx8fHwxNzg1OTU0OTYwfDA&ixlib=rb-4.1.0&q=85",
+        "description": "Close up of healthy brown wavy hair. Use as a background texture for AI coverage score or success state.",
+        "category": "Dashboard/Results"
+      },
+      "user_mirror_reflection": {
+        "url": "https://images.unsplash.com/photo-1721697989507-fed0b42bb453?crop=entropy&cs=srgb&fm=jpg&ixid=M3w3NTY2NzR8MHwxfHNlYXJjaHwxfHxtYW4lMjBsb29raW5nJTIwYXQlMjBtaXJyb3IlMjByZWZsZWN0aW9ufGVufDB8fHx8MTc4NTk1NDk2MHww&ixlib=rb-4.1.0&q=85",
+        "description": "Man looking at himself in a mirror. Perfect for the 'Before/After' feature section on the landing page or timeline placeholder.",
+        "category": "Marketing/Features"
+      }
+    },
+    "rules": "Images must not exceed 80vh on mobile. Never use placeholder text for images. If you need avatars, use lucide-react User icon or solid color circles."
+  },
+  "3d_libraries_and_charts": {
+    "charts": "Recharts (via Shadcn) for density/hairline trend cards and timeline progress charts.",
+    "animations": "Framer Motion for image gallery drag-and-drop interactions and page transitions.",
+    "icons": "lucide-react (default) for standard UI. If a medical/clinical feel is needed, you can use iconoir-react, but stick to lucide for speed."
+  },
+  "instructions_to_main_agent": [
+    "Build the Landing Page with custom HTML/Tailwind, avoiding Shadcn generic cards to maintain a creative 'Apple' aesthetic.",
+    "For the Dashboard, timeline, and Results, use a combination of Shadcn and Custom raw CSS grids.",
+    "Implement the Photo Upload with a drag-and-drop zone, integrating a silhouette overlay SVG.",
+    "Ensure the Timeline milestones (Week 0, 2, 4, 8) act as stepper triggers that load comparison views.",
+    "Implement Google Login UI in the Auth section.",
+    "Include a 'Dark Mode' toggle in the Settings page."
+  ],
+  "UNIVERSAL_GUIDELINES_FOR_MAIN_AGENT": [
+    "Avoid generic 'AI slop' aesthetics. No generic centered layouts, simplistic gradients, or uniform styling.",
+    "DO NOT apply 'transition: all'. Use specific transitions (e.g., transition-colors, transition-transform).",
+    "DO NOT center align the entire app container (.App { text-align: center; } is BANNED).",
+    "Use modern button styles (pill-shaped or rounded-xl) with interaction animations.",
+    "Do not use AI emoji characters like 🤖🧠💭💡🔮🎯 for icons. Use lucide-react icons.",
+    "Every interaction needs micro-animations (hover states, focus).",
+    "Use 2-3x more spacing than feels comfortable. Use p-8 or p-12 for major containers.",
+    "All interactive elements MUST include a data-testid attribute in kebab-case."
+  ]
+}
