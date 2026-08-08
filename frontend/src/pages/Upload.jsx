@@ -369,7 +369,7 @@ export default function UploadPage() {
       <main className="max-w-5xl mx-auto px-5 md:px-8 py-8">
         <div className="mb-6">
           <h1 className="font-heading text-3xl font-bold tracking-tight">New scan</h1>
-          <p className="text-muted-foreground mt-1">Auto-scan sweeps ~30s of frames and reports on the 3-4 most confident. Prefer control? Switch to manual.</p>
+          <p className="text-muted-foreground mt-1">Auto-scan captures many photos as you move, then averages all the sharp ones for a stable result. Prefer control? Switch to manual.</p>
         </div>
 
         <div className="inline-flex p-1 rounded-full bg-secondary mb-8" data-testid="mode-toggle">

@@ -18,7 +18,7 @@ export default function Navbar() {
 
   const role = user?.role || "user";
   const links = [...baseLinks];
-  if (role === "dermatologist") links.push({ to: "/derm", label: "Practice", icon: Stethoscope, id: "nav-practice" });
+  if (role === "dermatologist" || user?.is_dermatologist) links.push({ to: "/derm", label: "Practice", icon: Stethoscope, id: "nav-practice" });
   if (role === "admin" || role === "super_admin") links.push({ to: "/admin", label: "Admin", icon: ShieldCheck, id: "nav-admin" });
   links.push({ to: "/settings", label: "Settings", icon: Settings, id: "nav-settings" });
 

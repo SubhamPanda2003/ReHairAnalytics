@@ -150,7 +150,7 @@ async def auth_session(body: SessionExchange, response: Response):
     if resp.status_code != 200:
         raise HTTPException(status_code=401, detail="Invalid session id")
     data = resp.json()
-    email = data["email"]
+    email = (data["email"] or "").strip().lower()
     user = await db.users.find_one({"email": email}, {"_id": 0})
     if not user:
         user_id = f"user_{uuid.uuid4().hex[:12]}"
@@ -194,6 +194,7 @@ async def auth_me(request: Request, authorization: Optional[str] = Header(None))
     user = await get_current_user(request, authorization)
     profile = await db.profiles.find_one({"user_id": user["user_id"]}, {"_id": 0})
     user["profile"] = profile
+    user["is_dermatologist"] = bool(await db.dermatologist_profiles.find_one({"user_id": user["user_id"]}, {"_id": 1}))
     return user
 
 
@@ -644,8 +645,16 @@ def _derm_public(d: dict, include_link: bool = False) -> dict:
 async def derm_register(body: DermRegisterIn, request: Request, authorization: Optional[str] = Header(None)):
     user = await get_current_user(request, authorization)
     existing = await db.dermatologist_profiles.find_one({"user_id": user["user_id"]}, {"_id": 0})
-    status = existing.get("status") if existing else "pending"
-    if not existing:
+    if existing:
+        status = existing.get("status", "pending")
+        # Re-review if a previously approved dermatologist changes key public details.
+        if status == "approved" and (
+            existing.get("name") != body.name
+            or existing.get("specialty") != body.specialty
+            or existing.get("meeting_link") != body.meeting_link
+        ):
+            status = "pending"
+    else:
         status = "pending"
     doc = {
         "user_id": user["user_id"],

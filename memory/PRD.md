@@ -45,6 +45,14 @@ previous & baseline. 7. Progress charts + LLM non-diagnostic summary. 8. Export 
 - WEEKLY REMINDER: Settings toggle + day, dashboard "due" banner (>=7 days), optional browser notification. NOTE: no scheduled emails (no email provider wired).
 - Verified: 30/30 backend pytest + frontend UI (testing iteration_2, 100%). Fixed: partial-profile-update data loss (exclude_unset) and region persistence on manual analyze.
 
+## Update 2026-08-08 (scan + dermatologist/admin batch)
+- Auto-scan now averages ALL captured frames and drops only very blurry ones (quality<40). Full-scalp captures ~30 photos over 30s with directional prompts (turn left/right/down/up/back); crown/hairline ~13. Added flash/torch toggle for lighting.
+- Roles: user / dermatologist / admin / super_admin. Single fixed super_admin by email iampandasubham@gmail.com (SUPER_ADMIN_EMAIL env). Emails normalized lowercase.
+- Dermatologist self-registration -> pending; admin approves -> visible to users. Editing key fields after approval triggers re-review.
+- Users request appointment (date/time + note); dermatologist confirms -> Google Meet link (derm's own) revealed to patient. Decline/cancel supported.
+- super_admin promotes user->admin; super admin protected. Practice access preserved via is_dermatologist flag.
+- Verified: 56/56 backend pytest + all role-gated frontend flows (testing iteration_3, 100%). Live 30s camera capture UI-verified only.
+
 ## Backlog / Remaining (P1/P2)
 - P1: Weekly email/push reminders (notifications) — not yet implemented.
 - P2: Real CV (OpenCV/MediaPipe) hairline polygon + strand counting (spec future features).
