@@ -95,3 +95,9 @@ body {
 ::selection {
     background: hsl(var(--primary) / 0.22);
 }
+
+@media print {
+    .no-print { display: none !important; }
+    body { background: #fff; }
+    #report-sheet { border: none !important; box-shadow: none !important; padding: 0 !important; }
+}

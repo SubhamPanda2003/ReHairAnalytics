@@ -6,7 +6,22 @@ import Navbar from "@/components/Navbar";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { toast } from "sonner";
-import { UploadCloud, Camera, Check, AlertTriangle, X, Loader2, Sparkles, RotateCcw } from "lucide-react";
+import { UploadCloud, Camera, Check, AlertTriangle, X, Loader2, Sparkles, RotateCcw, Scan, Target, Play, CircleDot } from "lucide-react";
+
+const REGIONS = [
+  { key: "full", label: "Full scalp", icon: Scan, tip: "Sweep the phone slowly over your whole head." },
+  { key: "crown", label: "Crown", icon: CircleDot, tip: "Tilt your head down and hover over the top-back." },
+  { key: "hairline", label: "Hairline", icon: Target, tip: "Hold at forehead height, panning across the front." },
+];
+
+const GUIDE = [
+  "Move slowly across your scalp…",
+  "Keep the light even — face a window",
+  "Cover every angle of the focus zone",
+  "Hold ~20cm away, steady hands",
+  "Almost there — keep sweeping",
+];
+
 
 const VIEWS = [
   { key: "front", label: "Front" },
@@ -138,8 +153,127 @@ function ViewSlot({ view, state, onFile, onCamera }) {
   );
 }
 
+function AutoScan() {
+  const navigate = useNavigate();
+  const videoRef = useRef(null);
+  const streamRef = useRef(null);
+  const framesRef = useRef([]);
+  const [region, setRegion] = useState("full");
+  const [phase, setPhase] = useState("idle"); // idle | scanning | uploading
+  const [progress, setProgress] = useState(0);
+  const [count, setCount] = useState(0);
+  const [guide, setGuide] = useState(GUIDE[0]);
+
+  const DURATION = 30; // seconds
+  const INTERVAL = 2200; // ms between frames
+
+  const stopStream = () => {
+    streamRef.current?.getTracks().forEach((t) => t.stop());
+    streamRef.current = null;
+  };
+
+  const uploadFrames = async () => {
+    setPhase("uploading");
+    const fd = new FormData();
+    framesRef.current.forEach((blob, i) => fd.append("files", blob, `frame_${i}.jpg`));
+    fd.append("region", region);
+    try {
+      const res = await api.post("/scan", fd, { headers: { "Content-Type": "multipart/form-data" } });
+      toast.success(`Analyzed ${res.data.analysis.frames_used} best of ${res.data.analysis.frames_analyzed} frames`);
+      navigate(`/results/${res.data.session_id}`);
+    } catch (e) {
+      toast.error(e.response?.data?.detail || "Scan analysis failed");
+      setPhase("idle");
+    }
+  };
+
+  const start = async () => {
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "user", width: 1280, height: 1280 } });
+      streamRef.current = stream;
+      if (videoRef.current) videoRef.current.srcObject = stream;
+    } catch (e) {
+      toast.error("Camera unavailable. Use manual upload instead.");
+      return;
+    }
+    framesRef.current = [];
+    setCount(0); setProgress(0); setPhase("scanning");
+
+    const v = videoRef.current;
+    const canvas = document.createElement("canvas");
+    const started = Date.now();
+
+    const capture = () => {
+      if (!v || !v.videoWidth) return;
+      canvas.width = v.videoWidth; canvas.height = v.videoHeight;
+      canvas.getContext("2d").drawImage(v, 0, 0);
+      canvas.toBlob((b) => { if (b) { framesRef.current.push(b); setCount(framesRef.current.length); } }, "image/jpeg", 0.9);
+    };
+
+    const capTimer = setInterval(capture, INTERVAL);
+    setTimeout(capture, 400);
+    const progTimer = setInterval(() => {
+      const el = (Date.now() - started) / 1000;
+      setProgress(Math.min(100, (el / DURATION) * 100));
+      setGuide(GUIDE[Math.min(GUIDE.length - 1, Math.floor(el / (DURATION / GUIDE.length)))]);
+    }, 200);
+
+    setTimeout(() => {
+      clearInterval(capTimer); clearInterval(progTimer);
+      setProgress(100); stopStream();
+      if (framesRef.current.length === 0) { toast.error("No frames captured"); setPhase("idle"); return; }
+      uploadFrames();
+    }, DURATION * 1000);
+  };
+
+  useEffect(() => () => stopStream(), []);
+
+  const size = 260, stroke = 8, r = (size - stroke) / 2, circ = 2 * Math.PI * r;
+
+  return (
+    <div className="grid lg:grid-cols-5 gap-6" data-testid="autoscan-panel">
+      <div className="lg:col-span-2 rounded-3xl border border-border bg-card p-6">
+        <h3 className="font-heading font-semibold text-lg mb-1">Choose a focus zone</h3>
+        <p className="text-sm text-muted-foreground mb-4">We measure the whole area but score this zone with extra care.</p>
+        <div className="space-y-2.5">
+          {REGIONS.map((rg) => (
+            <button key={rg.key} onClick={() => setRegion(rg.key)} disabled={phase !== "idle"} data-testid={`region-${rg.key}`}
+              className={`w-full flex items-start gap-3 p-4 rounded-2xl border text-left transition-colors duration-200 ${region === rg.key ? "border-primary bg-accent/50" : "border-border hover:bg-secondary"}`}>
+              <div className={`w-9 h-9 rounded-xl flex items-center justify-center shrink-0 ${region === rg.key ? "bg-primary text-primary-foreground" : "bg-secondary"}`}><rg.icon className="w-4 h-4" /></div>
+              <div><p className="font-medium">{rg.label}</p><p className="text-xs text-muted-foreground">{rg.tip}</p></div>
+            </button>
+          ))}
+        </div>
+      </div>
+
+      <div className="lg:col-span-3 rounded-3xl border border-border bg-card p-6 flex flex-col items-center justify-center">
+        <div className="relative rounded-3xl overflow-hidden bg-black" style={{ width: size, height: size }}>
+          <video ref={videoRef} autoPlay playsInline muted className="w-full h-full object-cover" />
+          <Silhouette />
+          {phase !== "idle" && (
+            <svg className="absolute inset-0 -rotate-90" width={size} height={size}>
+              <circle cx={size / 2} cy={size / 2} r={r} fill="none" stroke="rgba(255,255,255,0.25)" strokeWidth={stroke} />
+              <circle cx={size / 2} cy={size / 2} r={r} fill="none" stroke="hsl(var(--primary))" strokeWidth={stroke}
+                strokeDasharray={circ} strokeDashoffset={circ - (progress / 100) * circ} strokeLinecap="round" style={{ transition: "stroke-dashoffset 0.2s linear" }} />
+            </svg>
+          )}
+          {phase === "scanning" && <span className="absolute top-3 left-1/2 -translate-x-1/2 glass text-xs px-3 py-1.5 rounded-full">{count} frames · {Math.round(progress)}%</span>}
+          {phase === "uploading" && <div className="absolute inset-0 bg-black/60 flex flex-col items-center justify-center gap-2 text-white"><Loader2 className="w-7 h-7 animate-spin" /><span className="text-sm">Analyzing best frames…</span></div>}
+        </div>
+
+        <p className="text-sm text-muted-foreground mt-4 h-5 text-center">{phase === "scanning" ? guide : "You just move — the app captures automatically for 30 seconds."}</p>
+
+        <Button onClick={start} disabled={phase !== "idle"} className="rounded-full h-12 px-8 mt-4 text-base" data-testid="start-scan-btn">
+          {phase === "idle" ? <><Play className="w-5 h-5 mr-1.5" /> Start 30-second scan</> : phase === "scanning" ? <>Scanning…</> : <>Analyzing…</>}
+        </Button>
+      </div>
+    </div>
+  );
+}
+
 export default function UploadPage() {
   const navigate = useNavigate();
+  const [mode, setMode] = useState("auto");
   const [sessionId, setSessionId] = useState(null);
   const [slots, setSlots] = useState({});
   const [camView, setCamView] = useState(null);
@@ -200,11 +334,25 @@ export default function UploadPage() {
     <div className="min-h-screen bg-background" data-testid="upload-page">
       <Navbar />
       <main className="max-w-5xl mx-auto px-5 md:px-8 py-8">
-        <div className="mb-8">
+        <div className="mb-6">
           <h1 className="font-heading text-3xl font-bold tracking-tight">New scan</h1>
-          <p className="text-muted-foreground mt-1">Capture standardized views. The Top / Crown view drives your primary density estimate.</p>
+          <p className="text-muted-foreground mt-1">Auto-scan sweeps ~30s of frames and reports on the 3-4 most confident. Prefer control? Switch to manual.</p>
         </div>
 
+        <div className="inline-flex p-1 rounded-full bg-secondary mb-8" data-testid="mode-toggle">
+          <button onClick={() => setMode("auto")} data-testid="mode-auto"
+            className={`flex items-center gap-2 px-5 py-2 rounded-full text-sm font-medium transition-colors duration-200 ${mode === "auto" ? "bg-primary text-primary-foreground" : "text-muted-foreground"}`}>
+            <Scan className="w-4 h-4" /> Auto-scan
+          </button>
+          <button onClick={() => setMode("manual")} data-testid="mode-manual"
+            className={`flex items-center gap-2 px-5 py-2 rounded-full text-sm font-medium transition-colors duration-200 ${mode === "manual" ? "bg-primary text-primary-foreground" : "text-muted-foreground"}`}>
+            <UploadCloud className="w-4 h-4" /> Manual views
+          </button>
+        </div>
+
+        {mode === "auto" ? (
+          <AutoScan />
+        ) : (
         <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-4 md:gap-6">
           {VIEWS.map((v) => (
             <motion.div key={v.key} initial={{ opacity: 0, y: 14 }} animate={{ opacity: 1, y: 0 }}>
@@ -220,6 +368,7 @@ export default function UploadPage() {
             </Button>
           </div>
         </div>
+        )}
       </main>
 
       <CameraDialog open={!!camView} onClose={() => setCamView(null)} onCapture={(file) => camView && uploadFile(camView, file)} />

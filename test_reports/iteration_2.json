@@ -1,0 +1,78 @@
+{
+  "summary": "Iteration-2 end-to-end tests for the new feature batch all PASS. 30/30 backend pytest cases green (20 legacy in test_backend.py + 10 new in test_new_features.py). Auto-scan POST /api/scan verified with real hair photos: 6 frames analyzed in parallel via gpt-5.6-terra, top min(4,N) confident frames averaged (frames_analyzed=6, frames_used=4). Same-day session reuse works (2nd /scan same-session_id, frames_analyzed grows to 9). Region focus persists on session and analysis (region='crown'/'hairline'). Invalid region falls back to 'full'. Profile reminder persists and returns via /auth/me. /api/progress returns last_date, days_since_last, and short-date labels ('Aug 08'). GET /api/sessions/{id} returns current_best_image, baseline_best_image, previous_best_image. Manual 5-view flow still works. Frontend UI verified with seeded session cookie: mode toggle (auto/manual), 3 region selectors, 5 view slots, manual upload+analyze->/results, region-badge 'Crown focus' on scan session, side-by-side (baseline vs current, natural widths 720/800), report page + download-report-btn (window.print stub confirmed called), Settings reminder switch persists across reload, dashboard reminder-banner shows exactly when days_since_last>=7 (banner text 'It's been 8 days since your last scan'). Skills loaded: ai-testing-core, ai-testing-image-video.",
+
+  "primary_ai_feature_verdicts": [
+    "AI multi-frame parallel metrics (POST /api/scan -> gpt-5.6-terra per-frame + top-N averaging) - pass - evidence: 6 real hair photos analyzed in parallel, response frames_analyzed=6 frames_used=4 with metrics in 0-100 range (density=89 coverage=95 hairline=92 overall=92 confidence=87 quality=90) and ai_summary >20 chars non-diagnostic. Same-day reuse: second call frames_analyzed=9 frames_used=4. Region focus persisted (analysis.region=='crown','hairline'). Command: pytest tests/test_new_features.py::TestNewFeatures - skill: ai-testing-image-video",
+    "AI metric analysis + summary (POST /api/sessions/{id}/analyze -> gpt-5.6-terra) - pass - evidence: manual scalp_front.jpg accepted at quality=92, /analyze returned all 4 scores 0-100 and summary. Command: pytest tests/test_backend.py::TestReHairEndToEnd::test_14_analyze_session - skill: ai-testing-image-video",
+    "Emergent Object Storage (put/get) - pass - evidence: /api/scan wrote 12+ frames per user; GET /api/files/rehairanalytics/uploads/<uid>/<id>.jpg 200 image/* len>500; browser side-by-side <img> naturalWidth 720 & 800 - skill: ai-testing-image-video"
+  ],
+
+  "backend_issues": {
+    "critical": [],
+    "minor": [
+      {"endpoint": "POST /api/profile", "issue": "ProfileIn.model_dump() sends every unset field as null. A partial POST (e.g. only {reminder_enabled, reminder_day}) wipes existing age/gender/hair_type/goals to null. Should use exclude_unset=True or $set only provided keys."},
+      {"endpoint": "POST /api/sessions/{id}/analyze", "issue": "Manual analyze does NOT persist the current session's `region` on the analysis doc. If a user first runs /scan with region=crown and later runs manual analyze on the same day session, the region field on analysis becomes undefined and the Results page's region-badge disappears. /scan's finalize_day_analysis writes region; /analyze should read session.region (or preserve prior analysis.region) for consistency."},
+      {"endpoint": "POST /api/scan", "issue": "Files that fail image_utils.process_image are silently skipped. If ALL frames fail (e.g. non-image bytes), a 400 'No valid frames captured' is correctly returned, but partial failures are invisible to the client. Consider including frames_rejected count in the response."}
+    ]
+  },
+
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [
+      {"flow": "Manual analyze after /scan (same day)", "issue": "Manual /analyze overwrites the previous /scan analysis and drops the region field; Results.jsx then hides the region-badge because a.region is undefined. Backend bug (see backend_issues.minor).", "affected_selectors": ["region-badge"]}
+    ],
+    "design_issues": []
+  },
+
+  "test_report_links": [
+    "/app/backend/tests/test_backend.py",
+    "/app/backend/tests/test_new_features.py",
+    "/app/backend/tests/conftest.py",
+    "/app/backend/tests/fixtures/scalp_front.jpg",
+    "/app/backend/tests/fixtures/scan_frame_0.jpg",
+    "/app/backend/tests/fixtures/scan_frame_1.jpg",
+    "/app/backend/tests/fixtures/scan_frame_2.jpg",
+    "/app/backend/tests/fixtures/scan_frame_3.jpg",
+    "/app/backend/tests/fixtures/scan_frame_4.jpg",
+    "/app/backend/tests/fixtures/scan_frame_5.jpg",
+    "/app/test_reports/pytest/pytest_results.xml",
+    "/app/test_reports/pytest/pytest_new_features.xml"
+  ],
+
+  "action_items": [
+    "Backend: In upsert_profile, use body.model_dump(exclude_unset=True) so partial updates (e.g. only reminder toggle) don't wipe age/gender/hair_type/goals.",
+    "Backend: analyze_session should include region on the analysis doc (pulled from tracking_sessions.region or existing analysis.region) so Results.jsx region-badge continues to render after a manual re-analyze.",
+    "(Optional) Nice-to-have: return frames_rejected count in /api/scan response so the UI can show 'analyzed X of Y frames captured'."
+  ],
+
+  "critical_code_review_comments": [
+    "server.py POST /profile: `doc = body.model_dump()` overwrites all fields, including with None. Partial updates lose data — bug.",
+    "server.py analyze_session (line ~442): builds new analysis doc but never carries region forward. Inconsistent with /scan's finalize_day_analysis which does set region.",
+    "server.py get_or_create_today_session: computes week_number = count of existing sessions. Fine, but note this is 'session index', not calendar week; the field naming is a small mismatch — consider renaming to `session_index` for clarity.",
+    "ai_service.py exception paths still return neutral hardcoded scores (65/68/70/75, quality=72). A silent AI-provider outage would still yield 'analysis' — masks real failures. Consider raising or flagging fallback=true.",
+    "storage.py init_storage() mutates module-level storage_key without a lock — fine for single-worker uvicorn, would race under multi-worker."
+  ],
+
+  "updated_files": [
+    "/app/backend/tests/test_backend.py",
+    "/app/backend/tests/test_new_features.py",
+    "/app/backend/tests/fixtures/scan_frame_0.jpg",
+    "/app/backend/tests/fixtures/scan_frame_1.jpg",
+    "/app/backend/tests/fixtures/scan_frame_2.jpg",
+    "/app/backend/tests/fixtures/scan_frame_3.jpg",
+    "/app/backend/tests/fixtures/scan_frame_4.jpg",
+    "/app/backend/tests/fixtures/scan_frame_5.jpg"
+  ],
+
+  "success_rate": {"backend": "100% (30/30 pytest)", "frontend": "100% for what could be tested (auto-scan UI only, side-by-side, region-badge, report/download, settings reminder, dashboard banner). Real 30s camera capture cannot be exercised in headless browser — verified UI only per task note."},
+
+  "test_credentials": "Seeded via pymongo per /app/memory/test_credentials.md. Fresh user each pytest run.",
+
+  "seed_data_creation": "test_new_features.py fixture `fresh_user` creates its own user_id + session_token (7d expiry). Used 6 real hair-photo variants (cropped/rotated derivatives of scalp_front.jpg at /app/backend/tests/fixtures/scan_frame_[0-5].jpg, 90-102KB each). UI test used a separate seeded user with 2 sessions (baseline 8-days-ago + today) to exercise side-by-side and reminder banner.",
+
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "New /scan flow works end-to-end. If the main agent fixes the two backend action items (partial-update profile + carry region on analyze_session), retest with test_new_features.py and add one test asserting POST /profile with only reminder fields does NOT reset age/gender. Reuse /app/backend/tests/fixtures/scan_frame_[0-5].jpg (real, varied photos) for /scan; scalp_front.jpg still reliably scores >=60 for the manual quality gate. Sessions are per-day now — same-day POST /sessions returns SAME id, do not expect a new session per call.",
+
+  "rca_of_the_issue": "N/A — no blocking issues. Two minor backend design/data-integrity items surfaced (see action_items); both are non-blocking, primary AI feature (auto-scan multi-frame parallel analyze) works correctly end-to-end."
+}

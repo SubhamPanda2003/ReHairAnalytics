@@ -74,20 +74,31 @@ async def analyze_quality(image_b64: str, view: str, session_id: str) -> dict:
         return {"quality": 72, "issues": ["Automated quality check unavailable; accepted with default score."], "retry": False}
 
 
-async def analyze_metrics(image_b64: str, view: str, session_id: str) -> dict:
+REGION_FOCUS = {
+    "full": "Assess the entire visible scalp and hair evenly.",
+    "crown": "Focus specifically on the CROWN / VERTEX (top-back) area — its density and how much scalp shows through there.",
+    "hairline": "Focus specifically on the FRONTAL HAIRLINE and temples — the boundary position, peak, and any temple recession.",
+}
+
+
+async def analyze_metrics(image_b64: str, view: str, session_id: str, region: str = "full") -> dict:
     system = (
         "You are an objective hair measurement assistant for standardized tracking photos. "
         "You NEVER diagnose disease or give medical advice. You estimate visible photographic metrics only. "
         "Respond ONLY with strict JSON."
     )
+    focus = REGION_FOCUS.get(region, REGION_FOCUS["full"])
     prompt = (
-        f"Analyze this '{view}' view hair/scalp photo. Estimate objective visible metrics on a 0-100 scale: "
+        f"Analyze this hair/scalp photo (view='{view}', focus region='{region}'). {focus} "
+        "Estimate objective visible metrics on a 0-100 scale: "
         "hairline_score (higher = stronger/more forward, less recession), "
         "density_score (higher = denser visible hair), "
         "coverage_score (higher = more scalp covered by hair, less visible scalp), "
-        "and overall_score (weighted blend). Also give confidence (0-100). "
+        "overall_score (weighted blend). Give confidence (0-100) — how reliably this exact frame shows the "
+        "focus region (low if blurry, off-angle, too far, or the region is not clearly visible). Also give "
+        "quality (0-100) for photographic usability. "
         "Return strict JSON: {\"hairline_score\":int,\"density_score\":int,\"coverage_score\":int,"
-        "\"overall_score\":int,\"confidence\":int,\"visible_scalp_pct\":int,\"hair_coverage_pct\":int}."
+        "\"overall_score\":int,\"confidence\":int,\"quality\":int,\"visible_scalp_pct\":int,\"hair_coverage_pct\":int}."
     )
     try:
         chat = _new_chat(session_id, system)
@@ -104,6 +115,7 @@ async def analyze_metrics(image_b64: str, view: str, session_id: str) -> dict:
             "coverage_score": coverage,
             "overall_score": overall,
             "confidence": _clamp(data.get("confidence"), default=80),
+            "quality": _clamp(data.get("quality"), default=75),
             "visible_scalp_pct": _clamp(data.get("visible_scalp_pct"), default=max(0, 100 - coverage)),
             "hair_coverage_pct": _clamp(data.get("hair_coverage_pct"), default=coverage),
         }
@@ -111,7 +123,7 @@ async def analyze_metrics(image_b64: str, view: str, session_id: str) -> dict:
         logger.error(f"analyze_metrics failed: {e}")
         return {
             "hairline_score": 70, "density_score": 65, "coverage_score": 68,
-            "overall_score": 68, "confidence": 75, "visible_scalp_pct": 32, "hair_coverage_pct": 68,
+            "overall_score": 68, "confidence": 75, "quality": 72, "visible_scalp_pct": 32, "hair_coverage_pct": 68,
         }
 
 

@@ -1,12 +1,13 @@
-import React from "react";
+import React, { useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { motion } from "framer-motion";
 import { api, fileUrl } from "@/lib/api";
+import { useAuth } from "@/context/AuthContext";
 import Navbar from "@/components/Navbar";
 import { Button } from "@/components/ui/button";
 import { LineChart, Line, AreaChart, Area, ResponsiveContainer, XAxis, YAxis, Tooltip, CartesianGrid } from "recharts";
-import { Flame, ImageIcon, TrendingUp, TrendingDown, Minus, Plus, Camera, ArrowRight, Sparkles } from "lucide-react";
+import { Flame, ImageIcon, TrendingUp, TrendingDown, Minus, Plus, Camera, ArrowRight, Sparkles, Bell } from "lucide-react";
 
 const fetchProgress = async () => (await api.get("/progress")).data;
 const fetchTimeline = async () => (await api.get("/timeline")).data;
@@ -25,6 +26,7 @@ const Card = ({ children, className = "", delay = 0, ...rest }) => (
 
 export default function Dashboard() {
   const navigate = useNavigate();
+  const { user } = useAuth();
   const { data: progress, isLoading } = useQuery({ queryKey: ["progress"], queryFn: fetchProgress });
   const { data: timeline } = useQuery({ queryKey: ["timeline"], queryFn: fetchTimeline });
 
@@ -33,6 +35,16 @@ export default function Dashboard() {
   const est = progress?.estimated_progress;
   const latestSession = timeline?.[timeline.length - 1];
   const latestImg = latestSession?.images?.[0];
+
+  const reminderOn = !!user?.profile?.reminder_enabled;
+  const daysSince = progress?.days_since_last;
+  const due = reminderOn && (daysSince === null || daysSince === undefined ? false : daysSince >= 7);
+
+  useEffect(() => {
+    if (due && "Notification" in window && Notification.permission === "granted") {
+      try { new Notification("ReHairAnalytics", { body: "Time for your weekly hair scan 📸" }); } catch (e) {}
+    }
+  }, [due]);
 
   return (
     <div className="min-h-screen bg-background" data-testid="dashboard-page">
@@ -47,6 +59,17 @@ export default function Dashboard() {
             <Camera className="w-4 h-4 mr-1.5" /> New scan
           </Button>
         </div>
+
+        {due && (
+          <motion.div initial={{ opacity: 0, y: -8 }} animate={{ opacity: 1, y: 0 }}
+            className="flex items-center justify-between gap-4 rounded-2xl border border-primary/30 bg-primary/10 px-5 py-4 mb-6" data-testid="reminder-banner">
+            <div className="flex items-center gap-3">
+              <Bell className="w-5 h-5 text-primary" />
+              <p className="text-sm font-medium">It's been {daysSince} days since your last scan — time for this week's capture.</p>
+            </div>
+            <Button size="sm" onClick={() => navigate("/upload")} className="rounded-full" data-testid="reminder-scan-btn">Scan now</Button>
+          </motion.div>
+        )}
 
         {isLoading ? (
           <div className="text-muted-foreground py-20 text-center">Loading…</div>
@@ -75,7 +98,7 @@ export default function Dashboard() {
                 {latestImg ? (
                   <img src={fileUrl(latestImg.thumb_path)} alt="latest" className="w-full h-20 object-cover rounded-xl" />
                 ) : <p className="font-heading text-2xl font-bold">—</p>}
-                <p className="text-sm text-muted-foreground mt-2">Week {latest?.week}</p>
+                <p className="text-sm text-muted-foreground mt-2">{latest?.date ? new Date(latest.date).toLocaleDateString() : "—"}</p>
               </Card>
               <Card delay={0.1} data-testid="card-est-progress">
                 <div className="flex items-center gap-2 text-muted-foreground text-xs uppercase tracking-[0.15em] mb-3"><Sparkles className="w-4 h-4" /> Est. progress</div>
@@ -141,7 +164,7 @@ export default function Dashboard() {
                     className="min-w-[160px] rounded-2xl border border-border overflow-hidden text-left hover:-translate-y-1 transition-transform duration-200 bg-secondary/40">
                     {s.images?.[0] ? <img src={fileUrl(s.images[0].thumb_path)} alt="" className="w-full h-24 object-cover" /> : <div className="w-full h-24 bg-muted" />}
                     <div className="p-3">
-                      <p className="font-heading font-semibold">Week {s.week_number}</p>
+                      <p className="font-heading font-semibold">{new Date(s.date).toLocaleDateString(undefined, { month: "short", day: "numeric" })}</p>
                       <p className="text-xs text-muted-foreground">{s.analysis ? `Overall ${s.analysis.overall_score}` : "Not analyzed"}</p>
                     </div>
                   </button>

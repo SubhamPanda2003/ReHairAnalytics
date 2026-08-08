@@ -13,6 +13,7 @@ import UploadPage from "@/pages/Upload";
 import Results from "@/pages/Results";
 import Timeline from "@/pages/Timeline";
 import Settings from "@/pages/Settings";
+import Report from "@/pages/Report";
 
 function AppRouter() {
   const location = useLocation();
@@ -27,6 +28,7 @@ function AppRouter() {
       <Route path="/upload" element={<ProtectedRoute><UploadPage /></ProtectedRoute>} />
       <Route path="/results/:sessionId" element={<ProtectedRoute><Results /></ProtectedRoute>} />
       <Route path="/timeline" element={<ProtectedRoute><Timeline /></ProtectedRoute>} />
+      <Route path="/report" element={<ProtectedRoute><Report /></ProtectedRoute>} />
       <Route path="/settings" element={<ProtectedRoute><Settings /></ProtectedRoute>} />
     </Routes>
   );

@@ -6,7 +6,7 @@ import { api, fileUrl } from "@/lib/api";
 import Navbar from "@/components/Navbar";
 import ScoreRing from "@/components/ScoreRing";
 import { Button } from "@/components/ui/button";
-import { ArrowLeft, Sparkles, TrendingUp, TrendingDown, Minus, ShieldCheck, Loader2 } from "lucide-react";
+import { ArrowLeft, Sparkles, TrendingUp, TrendingDown, Minus, Loader2, FileText, Target } from "lucide-react";
 
 const fetchSession = async (id) => (await api.get(`/sessions/${id}`)).data;
 
@@ -57,11 +57,14 @@ export default function Results() {
         <Button variant="ghost" onClick={() => navigate(-1)} className="rounded-full mb-4" data-testid="results-back"><ArrowLeft className="w-4 h-4 mr-1" /> Back</Button>
         <div className="flex flex-wrap items-end justify-between gap-3 mb-8">
           <div>
-            <p className="text-xs uppercase tracking-[0.2em] text-muted-foreground">Week {s?.week_number}</p>
+            <p className="text-xs uppercase tracking-[0.2em] text-muted-foreground">{s?.date ? new Date(s.date).toLocaleDateString(undefined, { weekday: "short", month: "short", day: "numeric", year: "numeric" }) : `Week ${s?.week_number}`}</p>
             <h1 className="font-heading text-3xl font-bold tracking-tight">Scan results</h1>
           </div>
-          <div className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full bg-accent text-accent-foreground text-xs font-semibold">
-            <ShieldCheck className="w-3.5 h-3.5" /> Objective measurement · not a diagnosis
+          <div className="flex items-center gap-2">
+            {a?.region && a.region !== "full" && (
+              <span className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-primary/10 text-primary text-xs font-semibold capitalize" data-testid="region-badge"><Target className="w-3.5 h-3.5" /> {a.region} focus</span>
+            )}
+            <Button variant="outline" className="rounded-full" onClick={() => navigate("/report")} data-testid="results-report-btn"><FileText className="w-4 h-4 mr-1.5" /> Report</Button>
           </div>
         </div>
 
@@ -93,6 +96,28 @@ export default function Results() {
               <div className="flex items-center gap-2 mb-3"><Sparkles className="w-5 h-5 text-primary" /><h3 className="font-heading font-semibold text-lg">AI insight</h3></div>
               <p className="text-base leading-relaxed text-foreground/90">{a.ai_summary}</p>
             </motion.div>
+
+            {/* Side-by-side comparison */}
+            {s.baseline_best_image && s.current_best_image && (
+              <motion.div initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.15 }}
+                className="rounded-3xl border border-border bg-card p-6 md:p-8 mb-6" data-testid="side-by-side">
+                <h3 className="font-heading font-semibold text-lg mb-4">Baseline vs current</h3>
+                <div className="grid grid-cols-2 gap-4">
+                  <figure>
+                    <div className="rounded-2xl overflow-hidden border border-border">
+                      <img src={fileUrl(s.baseline_best_image)} alt="baseline" className="w-full aspect-square object-cover" />
+                    </div>
+                    <figcaption className="text-center text-xs text-muted-foreground mt-2 uppercase tracking-[0.15em]">Baseline</figcaption>
+                  </figure>
+                  <figure>
+                    <div className="rounded-2xl overflow-hidden border border-primary/40">
+                      <img src={fileUrl(s.current_best_image)} alt="current" className="w-full aspect-square object-cover" />
+                    </div>
+                    <figcaption className="text-center text-xs text-primary mt-2 uppercase tracking-[0.15em]">This scan</figcaption>
+                  </figure>
+                </div>
+              </motion.div>
+            )}
 
             {/* Comparisons */}
             <div className="grid md:grid-cols-2 gap-6 mb-6">

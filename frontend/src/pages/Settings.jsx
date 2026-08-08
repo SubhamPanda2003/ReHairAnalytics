@@ -11,7 +11,9 @@ import {
   AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger,
 } from "@/components/ui/alert-dialog";
 import { toast } from "sonner";
-import { Moon, Download, ImageDown, Trash2, ShieldCheck, Ruler, Loader2 } from "lucide-react";
+import { Moon, Download, ImageDown, Trash2, ShieldCheck, Ruler, Loader2, Bell } from "lucide-react";
+
+const DAYS = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
 
 export default function Settings() {
   const navigate = useNavigate();
@@ -19,6 +21,19 @@ export default function Settings() {
   const [dark, setDark] = useState(document.documentElement.classList.contains("dark"));
   const [units, setUnits] = useState(localStorage.getItem("units") || "metric");
   const [busy, setBusy] = useState(false);
+  const [reminderOn, setReminderOn] = useState(!!user?.profile?.reminder_enabled);
+  const [reminderDay, setReminderDay] = useState(user?.profile?.reminder_day || "Monday");
+
+  const saveReminder = async (enabled, day) => {
+    setReminderOn(enabled); setReminderDay(day);
+    try {
+      if (enabled && "Notification" in window && Notification.permission === "default") {
+        await Notification.requestPermission();
+      }
+      await api.post("/profile", { reminder_enabled: enabled, reminder_day: day });
+      toast.success(enabled ? `Weekly reminder set for ${day}` : "Reminder turned off");
+    } catch (e) { toast.error("Could not save reminder"); }
+  };
 
   useEffect(() => {
     document.documentElement.classList.toggle("dark", dark);
@@ -90,6 +105,20 @@ export default function Settings() {
               <SelectContent><SelectItem value="metric">Metric</SelectItem><SelectItem value="imperial">Imperial</SelectItem></SelectContent>
             </Select>
           </Row>
+        </div>
+
+        <div className="rounded-2xl border border-border bg-card px-6 mb-6">
+          <Row icon={Bell} title="Weekly reminder" desc="Get a nudge to capture your weekly scan." testId="setting-reminder">
+            <Switch checked={reminderOn} onCheckedChange={(v) => saveReminder(v, reminderDay)} data-testid="reminder-switch" />
+          </Row>
+          {reminderOn && (
+            <Row icon={Bell} title="Reminder day" desc="We'll remind you in-app (and via browser notification if allowed)." testId="setting-reminder-day">
+              <Select value={reminderDay} onValueChange={(v) => saveReminder(true, v)}>
+                <SelectTrigger className="w-40 rounded-xl" data-testid="reminder-day-select"><SelectValue /></SelectTrigger>
+                <SelectContent>{DAYS.map((d) => <SelectItem key={d} value={d}>{d}</SelectItem>)}</SelectContent>
+              </Select>
+            </Row>
+          )}
         </div>
 
         <div className="rounded-2xl border border-border bg-card px-6 mb-6">

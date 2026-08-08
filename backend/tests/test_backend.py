@@ -93,14 +93,17 @@ class TestReHairEndToEnd:
         type(self).session_id = data["id"]
 
     def test_09_second_session_increments(self, auth_client):
+        # iter-2: sessions are per-DAY now. A second POST on the same day
+        # reuses today's session (same id, same week_number).
         r = auth_client.post(f"{API}/sessions", json={"notes": "week2"})
         assert r.status_code == 200
-        assert r.json()["week_number"] == 1
+        assert r.json()["id"] == self.session_id
+        assert r.json()["week_number"] == 0
 
     def test_10_list_sessions(self, auth_client):
         r = auth_client.get(f"{API}/sessions")
         assert r.status_code == 200
-        assert len(r.json()) >= 2
+        assert len(r.json()) >= 1
 
     # ---------- upload validation ----------
     def test_11_upload_bad_view(self, auth_client):
@@ -164,13 +167,13 @@ class TestReHairEndToEnd:
         r = auth_client.get(f"{API}/timeline")
         assert r.status_code == 200
         data = r.json()
-        assert isinstance(data, list) and len(data) >= 2
+        assert isinstance(data, list) and len(data) >= 1
 
     def test_16_progress(self, auth_client):
         r = auth_client.get(f"{API}/progress")
         assert r.status_code == 200
         data = r.json()
-        assert "points" in data and data["streak"] >= 2
+        assert "points" in data and data["streak"] >= 1
 
     # ---------- file download ----------
     def test_17_download_file(self, auth_client):
@@ -192,7 +195,7 @@ class TestReHairEndToEnd:
         data = r.json()
         for k in ("user", "profile", "tracking_sessions", "images", "analysis"):
             assert k in data
-        assert len(data["tracking_sessions"]) >= 2
+        assert len(data["tracking_sessions"]) >= 1
 
     # ---------- delete (last!) ----------
     def test_20_delete_account(self, auth_client):

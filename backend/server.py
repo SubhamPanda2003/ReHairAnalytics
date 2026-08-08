@@ -1,5 +1,6 @@
 import os
 import uuid
+import asyncio
 import logging
 from pathlib import Path
 from datetime import datetime, timezone, timedelta
@@ -70,10 +71,44 @@ class ProfileIn(BaseModel):
     gender: Optional[str] = None
     hair_type: Optional[str] = None
     goals: Optional[str] = None
+    reminder_enabled: Optional[bool] = None
+    reminder_day: Optional[str] = None
 
 
 class SessionIn(BaseModel):
     notes: Optional[str] = ""
+
+
+def today_str() -> str:
+    return datetime.now(timezone.utc).strftime("%Y-%m-%d")
+
+
+async def get_or_create_today_session(user_id: str, notes: str = ""):
+    d = today_str()
+    existing = await db.tracking_sessions.find_one({"user_id": user_id, "day": d}, {"_id": 0})
+    if existing:
+        return existing
+    count = await db.tracking_sessions.count_documents({"user_id": user_id})
+    doc = {
+        "id": str(uuid.uuid4()),
+        "user_id": user_id,
+        "week_number": count,
+        "day": d,
+        "date": datetime.now(timezone.utc).isoformat(),
+        "notes": notes or "",
+        "analyzed": False,
+    }
+    await db.tracking_sessions.insert_one(dict(doc))
+    doc.pop("_id", None)
+    return doc
+
+
+async def best_image_path(session_id: str) -> Optional[str]:
+    imgs = await db.images.find({"tracking_session_id": session_id}, {"_id": 0}).to_list(200)
+    if not imgs:
+        return None
+    imgs.sort(key=lambda i: (i.get("confidence", 0), i.get("quality_score", 0)), reverse=True)
+    return imgs[0].get("storage_path")
 
 
 # ---------------- Auth routes ----------------
@@ -159,17 +194,7 @@ async def upsert_profile(body: ProfileIn, request: Request, authorization: Optio
 @api_router.post("/sessions")
 async def create_session(body: SessionIn, request: Request, authorization: Optional[str] = Header(None)):
     user = await get_current_user(request, authorization)
-    count = await db.tracking_sessions.count_documents({"user_id": user["user_id"]})
-    doc = {
-        "id": str(uuid.uuid4()),
-        "user_id": user["user_id"],
-        "week_number": count,
-        "date": datetime.now(timezone.utc).isoformat(),
-        "notes": body.notes or "",
-        "analyzed": False,
-    }
-    await db.tracking_sessions.insert_one(dict(doc))
-    doc.pop("_id", None)
+    doc = await get_or_create_today_session(user["user_id"], body.notes or "")
     return doc
 
 
@@ -189,21 +214,152 @@ async def get_session(session_id: str, request: Request, authorization: Optional
     s = await db.tracking_sessions.find_one({"id": session_id, "user_id": user["user_id"]}, {"_id": 0})
     if not s:
         raise HTTPException(status_code=404, detail="Session not found")
-    s["images"] = await db.images.find({"tracking_session_id": session_id}, {"_id": 0}).to_list(20)
+    imgs = await db.images.find({"tracking_session_id": session_id}, {"_id": 0}).to_list(200)
+    imgs.sort(key=lambda i: (i.get("confidence", 0), i.get("quality_score", 0)), reverse=True)
+    s["images"] = imgs
     s["analysis"] = await db.analysis.find_one({"tracking_session_id": session_id}, {"_id": 0})
+    s["current_best_image"] = imgs[0].get("storage_path") if imgs else None
     # comparisons
     all_sessions = await db.tracking_sessions.find({"user_id": user["user_id"]}, {"_id": 0}).sort("week_number", 1).to_list(1000)
     prev = None
     baseline = None
+    prev_best = None
+    baseline_best = None
     if all_sessions:
         baseline_id = all_sessions[0]["id"]
         baseline = await db.analysis.find_one({"tracking_session_id": baseline_id}, {"_id": 0})
+        baseline_best = await best_image_path(baseline_id)
         idx = next((i for i, x in enumerate(all_sessions) if x["id"] == session_id), 0)
         if idx > 0:
             prev = await db.analysis.find_one({"tracking_session_id": all_sessions[idx - 1]["id"]}, {"_id": 0})
+            prev_best = await best_image_path(all_sessions[idx - 1]["id"])
     s["previous_analysis"] = prev
-    s["baseline_analysis"] = baseline if (baseline and baseline.get("tracking_session_id") != session_id) else None
+    s["previous_best_image"] = prev_best
+    is_baseline = bool(baseline and baseline.get("tracking_session_id") == session_id)
+    s["baseline_analysis"] = None if is_baseline else baseline
+    s["baseline_best_image"] = None if is_baseline else baseline_best
     return s
+
+
+async def finalize_day_analysis(user: dict, session_id: str, region: str):
+    frames = await db.images.find({"tracking_session_id": session_id, "confidence": {"$exists": True}}, {"_id": 0}).to_list(300)
+    if not frames:
+        raise HTTPException(status_code=400, detail="No analyzable frames")
+    frames.sort(key=lambda f: f.get("confidence", 0), reverse=True)
+    topn = frames[: min(4, len(frames))]
+
+    def avg(k):
+        return int(round(sum(f.get(k, 0) for f in topn) / len(topn)))
+
+    metrics = {
+        "hairline_score": avg("hairline_score"),
+        "density_score": avg("density_score"),
+        "coverage_score": avg("coverage_score"),
+        "overall_score": avg("overall_score"),
+        "confidence": avg("confidence"),
+        "visible_scalp_pct": avg("visible_scalp_pct"),
+        "hair_coverage_pct": avg("hair_coverage_pct"),
+    }
+
+    all_sessions = await db.tracking_sessions.find({"user_id": user["user_id"]}, {"_id": 0}).sort("week_number", 1).to_list(1000)
+    baseline_id = all_sessions[0]["id"] if all_sessions else session_id
+    baseline = await db.analysis.find_one({"tracking_session_id": baseline_id}, {"_id": 0})
+    idx = next((i for i, x in enumerate(all_sessions) if x["id"] == session_id), 0)
+    previous = None
+    if idx > 0:
+        previous = await db.analysis.find_one({"tracking_session_id": all_sessions[idx - 1]["id"]}, {"_id": 0})
+
+    summary = await ai_service.generate_summary(metrics, previous or {}, baseline or {}, session_id)
+    doc = {
+        "id": str(uuid.uuid4()),
+        "tracking_session_id": session_id,
+        "user_id": user["user_id"],
+        **metrics,
+        "quality_score": avg("quality_score"),
+        "region": region,
+        "frames_analyzed": len(frames),
+        "frames_used": len(topn),
+        "ai_summary": summary,
+        "created_at": datetime.now(timezone.utc).isoformat(),
+    }
+    await db.analysis.delete_many({"tracking_session_id": session_id})
+    await db.analysis.insert_one(dict(doc))
+    await db.tracking_sessions.update_one({"id": session_id}, {"$set": {"analyzed": True, "region": region}})
+    doc.pop("_id", None)
+
+    def deltas(cur, ref):
+        if not ref:
+            return None
+        return {
+            "density": round(cur["density_score"] - ref["density_score"], 1),
+            "coverage": round(cur["coverage_score"] - ref["coverage_score"], 1),
+            "hairline": round(cur["hairline_score"] - ref["hairline_score"], 1),
+            "overall": round(cur["overall_score"] - ref["overall_score"], 1),
+        }
+
+    return {
+        "session_id": session_id,
+        "analysis": doc,
+        "vs_previous": deltas(metrics, previous),
+        "vs_baseline": deltas(metrics, baseline) if (baseline and baseline.get("tracking_session_id") != session_id) else None,
+    }
+
+
+@api_router.post("/scan")
+async def auto_scan(request: Request, files: List[UploadFile] = File(...), region: str = Form("full"), authorization: Optional[str] = Header(None)):
+    user = await get_current_user(request, authorization)
+    if region not in ("full", "crown", "hairline"):
+        region = "full"
+    session = await get_or_create_today_session(user["user_id"])
+    session_id = session["id"]
+
+    processed = []
+    for f in files[:12]:
+        raw = await f.read()
+        if not raw or len(raw) > MAX_SIZE:
+            continue
+        try:
+            proc, _ = image_utils.process_image(raw)
+            processed.append(proc)
+        except Exception:
+            continue
+    if not processed:
+        raise HTTPException(status_code=400, detail="No valid frames captured")
+
+    async def analyze_one(i, proc):
+        b64 = image_utils.to_base64_jpeg(proc)
+        m = await ai_service.analyze_metrics(b64, "scan", f"{session_id}-{i}", region=region)
+        return proc, m
+
+    results = await asyncio.gather(*[analyze_one(i, p) for i, p in enumerate(processed)])
+
+    for proc, m in results:
+        img_id = str(uuid.uuid4())
+        base = f"{store.APP_NAME}/uploads/{user['user_id']}/{img_id}"
+        r1 = store.put_object(f"{base}.jpg", proc, "image/jpeg")
+        thumb = image_utils.make_thumbnail(proc)
+        store.put_object(f"{base}_thumb.jpg", thumb, "image/jpeg")
+        doc = {
+            "id": img_id,
+            "tracking_session_id": session_id,
+            "user_id": user["user_id"],
+            "view": "scan",
+            "region": region,
+            "storage_path": r1["path"],
+            "thumb_path": f"{base}_thumb.jpg",
+            "quality_score": m["quality"],
+            "hairline_score": m["hairline_score"],
+            "density_score": m["density_score"],
+            "coverage_score": m["coverage_score"],
+            "overall_score": m["overall_score"],
+            "confidence": m["confidence"],
+            "visible_scalp_pct": m["visible_scalp_pct"],
+            "hair_coverage_pct": m["hair_coverage_pct"],
+            "created_at": datetime.now(timezone.utc).isoformat(),
+        }
+        await db.images.insert_one(dict(doc))
+
+    return await finalize_day_analysis(user, session_id, region)
 
 
 @api_router.post("/sessions/{session_id}/upload")
@@ -333,9 +489,10 @@ async def progress(request: Request, authorization: Optional[str] = Header(None)
     for s in sessions:
         a = await db.analysis.find_one({"tracking_session_id": s["id"]}, {"_id": 0})
         if a:
+            _dt = datetime.fromisoformat(s["date"]) if isinstance(s["date"], str) else s["date"]
             points.append({
                 "week": s["week_number"],
-                "label": f"Week {s['week_number']}",
+                "label": _dt.strftime("%b %d"),
                 "date": s["date"],
                 "density": a["density_score"],
                 "coverage": a["coverage_score"],
@@ -354,12 +511,21 @@ async def progress(request: Request, authorization: Optional[str] = Header(None)
             "hairline": round(latest["hairline"] - baseline["hairline"], 1),
             "overall": round(latest["overall"] - baseline["overall"], 1),
         }
+    last_date = sessions[-1]["date"] if sessions else None
+    days_since = None
+    if last_date:
+        ld = datetime.fromisoformat(last_date)
+        if ld.tzinfo is None:
+            ld = ld.replace(tzinfo=timezone.utc)
+        days_since = (datetime.now(timezone.utc) - ld).days
     return {
         "points": points,
         "latest": latest,
         "baseline": baseline,
         "streak": streak,
         "estimated_progress": est_progress,
+        "last_date": last_date,
+        "days_since_last": days_since,
         "total_uploads": await db.images.count_documents({"user_id": user["user_id"]}),
     }
 

@@ -67,8 +67,8 @@ export default function Timeline() {
                   <div className="rounded-2xl border border-border bg-card p-4 flex items-center gap-4 hover:-translate-y-0.5 transition-transform duration-200">
                     {s.images?.[0] ? <img src={fileUrl(s.images[0].thumb_path)} alt="" className="w-16 h-16 rounded-xl object-cover" /> : <div className="w-16 h-16 rounded-xl bg-muted flex items-center justify-center"><ImageOff className="w-5 h-5 text-muted-foreground" /></div>}
                     <div className="flex-1 min-w-0">
-                      <p className="font-heading font-semibold">Week {s.week_number}</p>
-                      <p className="text-xs text-muted-foreground">{new Date(s.date).toLocaleDateString()} · {s.images?.length || 0} views</p>
+                      <p className="font-heading font-semibold">{new Date(s.date).toLocaleDateString(undefined, { weekday: "short", month: "short", day: "numeric" })}</p>
+                      <p className="text-xs text-muted-foreground">{s.region && s.region !== "full" ? `${s.region} focus · ` : ""}{s.images?.length || 0} photos</p>
                       {s.analysis ? (
                         <div className="flex gap-3 mt-1.5 text-xs">
                           <span>Density <b>{s.analysis.density_score}</b></span>
