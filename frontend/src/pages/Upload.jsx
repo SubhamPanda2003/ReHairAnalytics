@@ -6,7 +6,7 @@ import Navbar from "@/components/Navbar";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { toast } from "sonner";
-import { UploadCloud, Camera, Check, AlertTriangle, X, Loader2, Sparkles, RotateCcw, Scan, Target, Play, CircleDot, Zap, ZapOff } from "lucide-react";
+import { UploadCloud, Camera, Check, AlertTriangle, X, Loader2, Sparkles, RotateCcw, Scan, Target, Play, CircleDot, Sun, SunDim } from "lucide-react";
 
 const REGIONS = [
   { key: "full", label: "Full scalp", icon: Scan, tip: "Sweep the phone slowly over your whole head." },
@@ -157,35 +157,19 @@ function AutoScan() {
   const navigate = useNavigate();
   const videoRef = useRef(null);
   const streamRef = useRef(null);
-  const trackRef = useRef(null);
   const framesRef = useRef([]);
   const [region, setRegion] = useState("full");
   const [phase, setPhase] = useState("idle"); // idle | scanning | uploading
   const [progress, setProgress] = useState(0);
   const [count, setCount] = useState(0);
   const [guide, setGuide] = useState("");
-  const [torchWanted, setTorchWanted] = useState(false);
-  const [torchSupported, setTorchSupported] = useState(true);
+  const [screenLight, setScreenLight] = useState(true);
 
   const P = REGION_PARAMS[region];
 
   const stopStream = () => {
     streamRef.current?.getTracks().forEach((t) => t.stop());
-    streamRef.current = null; trackRef.current = null;
-  };
-
-  const applyTorch = async (on) => {
-    const track = trackRef.current;
-    if (!track) return;
-    const caps = track.getCapabilities ? track.getCapabilities() : {};
-    if (!caps.torch) { setTorchSupported(false); toast.info("Flash isn't supported on this camera/device"); return; }
-    try { await track.applyConstraints({ advanced: [{ torch: on }] }); } catch (e) { setTorchSupported(false); }
-  };
-
-  const toggleTorch = async () => {
-    const next = !torchWanted;
-    setTorchWanted(next);
-    if (phase === "scanning") await applyTorch(next);
+    streamRef.current = null;
   };
 
   const uploadFrames = async () => {
@@ -205,9 +189,8 @@ function AutoScan() {
 
   const start = async () => {
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment", width: 1280, height: 1280 } });
+      const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "user", width: 1280, height: 1280 } });
       streamRef.current = stream;
-      trackRef.current = stream.getVideoTracks()[0];
       if (videoRef.current) videoRef.current.srcObject = stream;
     } catch (e) {
       toast.error("Camera unavailable. Use manual upload instead.");
@@ -215,7 +198,6 @@ function AutoScan() {
     }
     framesRef.current = [];
     setCount(0); setProgress(0); setPhase("scanning"); setGuide(P.guides[0]);
-    if (torchWanted) applyTorch(true);
 
     const v = videoRef.current;
     const canvas = document.createElement("canvas");
@@ -263,13 +245,13 @@ function AutoScan() {
           ))}
         </div>
         <div className="mt-4 rounded-2xl bg-secondary/50 p-3 text-xs text-muted-foreground">
-          Tip: face a window or bright light. Turn on Flash if it's dim — even lighting keeps your scores reliable.
+          Tip: use the selfie camera in front of a window. In dim rooms, keep Screen light on — the bright screen lights up your face.
         </div>
       </div>
 
-      <div className="lg:col-span-3 rounded-3xl border border-border bg-card p-6 flex flex-col items-center justify-center">
-        <div className="relative rounded-3xl overflow-hidden bg-black" style={{ width: size, height: size }}>
-          <video ref={videoRef} autoPlay playsInline muted className="w-full h-full object-cover" />
+      <div className={`lg:col-span-3 rounded-3xl border p-6 flex flex-col items-center justify-center transition-colors duration-300 ${phase === "scanning" && screenLight ? "bg-white border-white" : "border-border bg-card"}`}>
+        <div className={`relative rounded-3xl overflow-hidden ${phase === "scanning" && screenLight ? "ring-8 ring-white shadow-[0_0_120px_40px_rgba(255,255,255,0.9)]" : ""}`} style={{ width: size, height: size, background: "#000" }}>
+          <video ref={videoRef} autoPlay playsInline muted className="w-full h-full object-cover -scale-x-100" />
           <Silhouette />
           {phase !== "idle" && (
             <svg className="absolute inset-0 -rotate-90" width={size} height={size}>
@@ -280,22 +262,22 @@ function AutoScan() {
           )}
           {phase === "scanning" && <span className="absolute top-3 left-1/2 -translate-x-1/2 glass text-xs px-3 py-1.5 rounded-full">{count} photos · {Math.round(progress)}%</span>}
           {phase === "scanning" && <span className="absolute bottom-3 left-1/2 -translate-x-1/2 bg-primary text-primary-foreground text-sm font-semibold px-4 py-2 rounded-full text-center max-w-[90%]">{guide}</span>}
-          <button onClick={toggleTorch} data-testid="torch-toggle"
-            className={`absolute top-3 right-3 w-9 h-9 rounded-full flex items-center justify-center transition-colors duration-200 ${torchWanted ? "bg-primary text-primary-foreground" : "glass text-white"}`}
-            title="Toggle flash">
-            {torchWanted ? <Zap className="w-4 h-4" /> : <ZapOff className="w-4 h-4" />}
+          <button onClick={() => setScreenLight((v) => !v)} data-testid="light-toggle"
+            className={`absolute top-3 right-3 w-9 h-9 rounded-full flex items-center justify-center transition-colors duration-200 ${screenLight ? "bg-primary text-primary-foreground" : "glass text-white"}`}
+            title="Toggle screen light">
+            {screenLight ? <Sun className="w-4 h-4" /> : <SunDim className="w-4 h-4" />}
           </button>
         </div>
 
-        <p className="text-sm text-muted-foreground mt-4 h-5 text-center">{phase === "idle" ? `You just move — the app auto-captures ~${P.target} photos over ${P.duration}s.` : phase === "uploading" ? "Averaging your sharpest photos…" : "Follow the on-screen directions"}</p>
+        <p className={`text-sm mt-4 h-5 text-center ${phase === "scanning" && screenLight ? "text-stone-500" : "text-muted-foreground"}`}>{phase === "idle" ? `You just move — the app auto-captures ~${P.target} photos over ${P.duration}s.` : phase === "uploading" ? "Averaging your sharpest photos…" : "Follow the on-screen directions"}</p>
 
         <div className="flex items-center gap-3 mt-4">
           <Button onClick={start} disabled={phase !== "idle"} className="rounded-full h-12 px-8 text-base" data-testid="start-scan-btn">
             {phase === "idle" ? <><Play className="w-5 h-5 mr-1.5" /> Start {P.duration}s scan</> : phase === "scanning" ? <>Scanning…</> : <><Loader2 className="w-5 h-5 mr-1.5 animate-spin" /> Analyzing…</>}
           </Button>
           {phase === "idle" && (
-            <Button variant="outline" onClick={toggleTorch} className="rounded-full h-12" data-testid="torch-btn">
-              {torchWanted ? <Zap className="w-4 h-4 mr-1.5" /> : <ZapOff className="w-4 h-4 mr-1.5" />} Flash {torchWanted ? "on" : "off"}
+            <Button variant="outline" onClick={() => setScreenLight((v) => !v)} className="rounded-full h-12" data-testid="light-btn">
+              {screenLight ? <Sun className="w-4 h-4 mr-1.5" /> : <SunDim className="w-4 h-4 mr-1.5" />} Screen light {screenLight ? "on" : "off"}
             </Button>
           )}
         </div>

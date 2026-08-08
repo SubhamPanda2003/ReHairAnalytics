@@ -1,0 +1,28 @@
+{
+  "summary": "Iteration-4 targeted frontend verification of the auto-scan camera bug fix (front/selfie camera) and the flash->screen-light replacement on /upload. Frontend only, backend skipped per request. Seeded a temp MongoDB user + session_token (test_database) and set the session_token cookie to pass ProtectedRoute. getUserMedia was monkey-patched via add_init_script BEFORE app JS ran, recording constraints into window.__gumCalls and returning a canvas.captureStream() fake video track (no browser launch flags needed). RESULTS - ALL PASS: (1) navigator.mediaDevices.getUserMedia called exactly once on Start with {video:{facingMode:'user', width:1280, height:1280}} -> facingMode === 'user' CONFIRMED (no 'environment'). (2) torch-toggle and torch-btn are completely absent (count 0 each). (3) light-toggle (on-video, top-right) and light-btn both present; light-btn label flips 'Screen light on' -> 'Screen light off' -> 'Screen light on'. (4) After Start with default region 'full': button becomes 'Scanning...' and disabled, photo counter increments ('3 photos - 8%' then '4 photos - 10%'), directional guidance 'Face the camera straight on' shows, progress ring animates, real frames captured from the fake stream. (5) Screen light effect verified by class + computed style: scanning panel goes from 'border-border bg-card' to 'bg-white border-white' and the video wrapper gains 'ring-8 ring-white shadow-[0_0_120px_40px_rgba(255,255,255,0.9)]'; clicking light-toggle mid-scan reverts both instantly. (6) Video element carries '-scale-x-100' (mirrored selfie). (7) mode-auto/mode-manual toggle and region-full/region-crown/region-hairline all render and are visible; Auto-scan is the default. The 30s capture was deliberately aborted (~2-3s in) by navigating to /dashboard, so ZERO AI /api/scan calls were fired. Also code-verified that the Manual-views camera path (Upload.jsx line 44) uses facingMode:'user' too. Temp seed user + session deleted after the run.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [
+      {"screen": "/upload auto-scan panel (light theme)", "issues": ["The screen-light flood is visually weak in the default light theme: --card is already near-white, so switching to bg-white barely changes the panel; only the white ring/glow and border change is perceptible. On a phone in a dim room the effect works, but consider flooding a larger area (full-screen white overlay behind the video) or raising screen brightness perception, otherwise the feature under-delivers on light theme.", "light-btn is only rendered while phase === 'idle', so during the 30s scan the labelled 'Screen light on/off' button disappears and only the small unlabelled icon (light-toggle) remains - discoverability of turning the light off mid-scan is low."]}
+    ]
+  },
+  "test_report_links": ["/app/test_reports/iteration_4.json"],
+  "action_items": [
+    "No functional fixes required for this bug fix - facingMode:'user' confirmed, torch removed, screen light works.",
+    "Optional UX: make the screen-light flood cover more of the viewport (light theme bg-card is already white so the effect is subtle) and keep a labelled screen-light control visible during scanning."
+  ],
+  "critical_code_review_comments": [
+    "Upload.jsx AutoScan.start(): getUserMedia error path only shows a toast; consider also surfacing NotAllowedError vs NotFoundError so users know it is a permission issue.",
+    "Upload.jsx: the 30s scan timers (capTimer/progTimer/final setTimeout) are not stored in refs and the cleanup effect only stops the stream - unmounting mid-scan leaves the timeouts running and can call setState/uploadFrames after unmount. Low risk (route unmount) but worth a ref-based clearTimeout on cleanup. Reproduced indirectly: I navigated away mid-scan and saw no error, but the final upload timeout still lives until it fires."
+  ],
+  "updated_files": [],
+  "success_rate": {"backend": "not tested (skipped per request)", "frontend": "100% (13/13 assertions passed)"},
+  "seed_data_creation": "Temp user TEST_ui-cam-1786182802 + session_token in test_database; deleted after the run. Pre-existing non-TEST leftovers from iteration 3 (drjane_2ab0@ex.com etc.) still present - see iteration_3.json.",
+  "should_call_test_agent_after_fix": false,
+  "should_main_agent_self_test": true,
+  "test_credentials": "No passwords - seed user + session_token in MongoDB test_database per /app/memory/test_credentials.md; auth via session_token cookie (domain growth-timeline-6.preview.emergentagent.com, secure, sameSite None).",
+  "context_for_next_testing_agent": "To test camera flows headlessly, do NOT rely on launch flags: use page.add_init_script to replace navigator.mediaDevices.getUserMedia with a function that records constraints in window.__gumCalls and returns document.createElement('canvas').captureStream(10). This makes the real capture loop run and frames accumulate. Always abort before P.duration (full=30s, crown/hairline=24s) to avoid firing the real gpt-5.6 /api/scan call. Screen-light state must be asserted on className ('bg-white border-white' / 'ring-white'), NOT computed backgroundColor, because bg-card is also rgb(255,255,255) in the light theme.",
+  "rca_of_the_issue": "Original bug (back camera) is fixed at Upload.jsx:192 - getUserMedia constraint is {video:{facingMode:'user',width:1280,height:1280}}; captured live at runtime and asserted === 'user'. Torch code path fully removed (no torch testids, no applyConstraints/advanced:[{torch}] usage) and replaced by the screenLight React state that drives bg-white/ring-white on the scanning panel."
+}
