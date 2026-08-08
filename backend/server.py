@@ -29,6 +29,17 @@ db = client[os.environ["DB_NAME"]]
 app = FastAPI(title="ReHairAnalytics API")
 api_router = APIRouter(prefix="/api")
 
+
+@app.get("/health")
+async def health():
+    return {"status": "healthy"}
+
+
+@app.get("/api/health")
+async def api_health():
+    return {"status": "healthy"}
+
+
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s")
 logger = logging.getLogger(__name__)
 
@@ -239,14 +250,27 @@ async def create_session(body: SessionIn, request: Request, authorization: Optio
     return doc
 
 
+async def _attach_children(sessions):
+    ids = [s["id"] for s in sessions]
+    if not ids:
+        return sessions
+    imgs = await db.images.find({"tracking_session_id": {"$in": ids}}, {"_id": 0}).to_list(20000)
+    ans = await db.analysis.find({"tracking_session_id": {"$in": ids}}, {"_id": 0}).to_list(2000)
+    img_map = {}
+    for im in imgs:
+        img_map.setdefault(im["tracking_session_id"], []).append(im)
+    ana_map = {a["tracking_session_id"]: a for a in ans}
+    for s in sessions:
+        s["images"] = img_map.get(s["id"], [])
+        s["analysis"] = ana_map.get(s["id"])
+    return sessions
+
+
 @api_router.get("/sessions")
 async def list_sessions(request: Request, authorization: Optional[str] = Header(None)):
     user = await get_current_user(request, authorization)
     sessions = await db.tracking_sessions.find({"user_id": user["user_id"]}, {"_id": 0}).sort("week_number", 1).to_list(1000)
-    for s in sessions:
-        s["images"] = await db.images.find({"tracking_session_id": s["id"]}, {"_id": 0}).to_list(20)
-        s["analysis"] = await db.analysis.find_one({"tracking_session_id": s["id"]}, {"_id": 0})
-    return sessions
+    return await _attach_children(sessions)
 
 
 @api_router.get("/sessions/{session_id}")
@@ -362,7 +386,7 @@ async def auto_scan(request: Request, files: List[UploadFile] = File(...), regio
         if not raw or len(raw) > MAX_SIZE:
             continue
         try:
-            proc, _ = image_utils.process_image(raw)
+            proc, _ = await asyncio.to_thread(image_utils.process_image, raw)
             processed.append(proc)
         except Exception:
             continue
@@ -373,7 +397,7 @@ async def auto_scan(request: Request, files: List[UploadFile] = File(...), regio
 
     async def analyze_one(i, proc):
         async with sem:
-            b64 = image_utils.to_base64_jpeg(proc)
+            b64 = await asyncio.to_thread(image_utils.to_base64_jpeg, proc)
             m = await ai_service.analyze_metrics(b64, "scan", f"{session_id}-{i}", region=region)
         return proc, m
 
@@ -382,9 +406,9 @@ async def auto_scan(request: Request, files: List[UploadFile] = File(...), regio
     for proc, m in results:
         img_id = str(uuid.uuid4())
         base = f"{store.APP_NAME}/uploads/{user['user_id']}/{img_id}"
-        r1 = store.put_object(f"{base}.jpg", proc, "image/jpeg")
-        thumb = image_utils.make_thumbnail(proc)
-        store.put_object(f"{base}_thumb.jpg", thumb, "image/jpeg")
+        r1 = await asyncio.to_thread(store.put_object, f"{base}.jpg", proc, "image/jpeg")
+        thumb = await asyncio.to_thread(image_utils.make_thumbnail, proc)
+        await asyncio.to_thread(store.put_object, f"{base}_thumb.jpg", thumb, "image/jpeg")
         doc = {
             "id": img_id,
             "tracking_session_id": session_id,
@@ -423,9 +447,9 @@ async def upload_image(session_id: str, request: Request, file: UploadFile = Fil
     if len(raw) > MAX_SIZE:
         raise HTTPException(status_code=400, detail="Max size 10MB")
 
-    processed, ctype = image_utils.process_image(raw)
-    thumb = image_utils.make_thumbnail(processed)
-    b64 = image_utils.to_base64_jpeg(processed)
+    processed, ctype = await asyncio.to_thread(image_utils.process_image, raw)
+    thumb = await asyncio.to_thread(image_utils.make_thumbnail, processed)
+    b64 = await asyncio.to_thread(image_utils.to_base64_jpeg, processed)
 
     quality = await ai_service.analyze_quality(b64, view, session_id)
     if quality["quality"] < 60:
@@ -435,8 +459,8 @@ async def upload_image(session_id: str, request: Request, file: UploadFile = Fil
     base_path = f"{store.APP_NAME}/uploads/{user['user_id']}/{img_id}"
     img_path = f"{base_path}.jpg"
     thumb_path = f"{base_path}_thumb.jpg"
-    r1 = store.put_object(img_path, processed, ctype)
-    store.put_object(thumb_path, thumb, "image/jpeg")
+    r1 = await asyncio.to_thread(store.put_object, img_path, processed, ctype)
+    await asyncio.to_thread(store.put_object, thumb_path, thumb, "image/jpeg")
 
     # remove existing image for this view in this session
     await db.images.delete_many({"tracking_session_id": session_id, "view": view})
@@ -469,8 +493,8 @@ async def analyze_session(session_id: str, request: Request, authorization: Opti
 
     # pick primary image: prefer top, then front
     primary = next((i for i in images if i["view"] == "top"), None) or next((i for i in images if i["view"] == "front"), None) or images[0]
-    data, _ = store.get_object(primary["storage_path"])
-    b64 = image_utils.to_base64_jpeg(data)
+    data, _ = await asyncio.to_thread(store.get_object, primary["storage_path"])
+    b64 = await asyncio.to_thread(image_utils.to_base64_jpeg, data)
     metrics = await ai_service.analyze_metrics(b64, primary["view"], session_id)
 
     # comparisons
@@ -522,10 +546,7 @@ async def analyze_session(session_id: str, request: Request, authorization: Opti
 async def timeline(request: Request, authorization: Optional[str] = Header(None)):
     user = await get_current_user(request, authorization)
     sessions = await db.tracking_sessions.find({"user_id": user["user_id"]}, {"_id": 0}).sort("week_number", 1).to_list(1000)
-    for s in sessions:
-        s["images"] = await db.images.find({"tracking_session_id": s["id"]}, {"_id": 0}).to_list(20)
-        s["analysis"] = await db.analysis.find_one({"tracking_session_id": s["id"]}, {"_id": 0})
-    return sessions
+    return await _attach_children(sessions)
 
 
 @api_router.get("/progress")
@@ -587,7 +608,7 @@ async def download_file(path: str, request: Request, authorization: Optional[str
     record = await db.images.find_one({"$or": [{"storage_path": path}, {"thumb_path": path}]}, {"_id": 0})
     if not record:
         raise HTTPException(status_code=404, detail="File not found")
-    data, ctype = store.get_object(path)
+    data, ctype = await asyncio.to_thread(store.get_object, path)
     return StreamingResponse(io.BytesIO(data), media_type=ctype)
 
 
