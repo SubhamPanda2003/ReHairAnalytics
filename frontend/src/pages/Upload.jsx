@@ -291,9 +291,9 @@ function AutoScan() {
   return (
     <>
       <div className="grid lg:grid-cols-5 gap-6" data-testid="autoscan-panel">
-        <div className="lg:col-span-2 rounded-3xl border border-border bg-card p-6">
+        <div className="lg:col-span-2 min-w-0 rounded-3xl border border-border bg-card p-6">
           <h3 className="font-heading font-semibold text-lg mb-1">Choose a focus zone</h3>
-          <p className="text-sm text-muted-foreground mb-4">Full scalp captures ~30 photos across every angle. Crown & hairline zoom in on one area.</p>
+          <p className="text-sm text-muted-foreground mb-4">Full scalp keeps the sharpest photo of every angle. Crown & hairline zoom in on one area.</p>
           <div className="space-y-2.5">
             {REGIONS.map((rg) => (
               <button key={rg.key} onClick={() => setRegion(rg.key)} data-testid={`region-${rg.key}`}
