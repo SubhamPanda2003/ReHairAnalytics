@@ -36,6 +36,15 @@ previous & baseline. 7. Progress charts + LLM non-diagnostic summary. 8. Export 
 - Lazy session creation on first upload; softened AI quality prompt to reduce false rejections.
 - Verified: 20/20 backend pytest + frontend auth-gated flows (testing iteration_1, 100%).
 
+## Update 2026-08-08 (feature batch)
+- 30-second AUTO-SCAN: continuous camera capture (~12 frames), parallel AI analysis, report built from top 3-4 most-confident frames (reduces score fluctuation). Manual 5-view upload kept as secondary.
+- FOCUS ZONES: full / crown / hairline — region stored on session + analysis, shown as a badge.
+- DATE-BASED sessions: sessions keyed by calendar day; same-day scans reuse the day's session and re-average from top confident frames. Charts/timeline now labelled by date.
+- SIDE-BY-SIDE baseline vs current best-image comparison on Results + Report.
+- REPORT page (/report): printable/downloadable progress report (download-only, no public link).
+- WEEKLY REMINDER: Settings toggle + day, dashboard "due" banner (>=7 days), optional browser notification. NOTE: no scheduled emails (no email provider wired).
+- Verified: 30/30 backend pytest + frontend UI (testing iteration_2, 100%). Fixed: partial-profile-update data loss (exclude_unset) and region persistence on manual analyze.
+
 ## Backlog / Remaining (P1/P2)
 - P1: Weekly email/push reminders (notifications) — not yet implemented.
 - P2: Real CV (OpenCV/MediaPipe) hairline polygon + strand counting (spec future features).

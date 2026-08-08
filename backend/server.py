@@ -177,7 +177,7 @@ async def get_profile(request: Request, authorization: Optional[str] = Header(No
 @api_router.post("/profile")
 async def upsert_profile(body: ProfileIn, request: Request, authorization: Optional[str] = Header(None)):
     user = await get_current_user(request, authorization)
-    doc = body.model_dump()
+    doc = body.model_dump(exclude_unset=True)
     doc["user_id"] = user["user_id"]
     existing = await db.profiles.find_one({"user_id": user["user_id"]}, {"_id": 0})
     if existing:
@@ -445,6 +445,7 @@ async def analyze_session(session_id: str, request: Request, authorization: Opti
         "user_id": user["user_id"],
         **metrics,
         "quality_score": avg_quality,
+        "region": s.get("region", "full"),
         "ai_summary": summary,
         "created_at": datetime.now(timezone.utc).isoformat(),
     }
