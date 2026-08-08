@@ -113,7 +113,7 @@ export default function Report() {
                 </div>
               )}
 
-              <p className="text-[11px] text-muted-foreground border-t border-border pt-4">This report presents objective photographic measurements only. It does not diagnose hair loss or provide medical advice. Based on {progress?.streak} scan(s); latest built from the top confident frames.</p>
+              <p className="text-[11px] text-muted-foreground border-t border-border pt-4">This report presents objective photographic measurements only. It does not diagnose hair loss or provide medical advice. Based on {progress?.streak} scan(s); latest averaged across all sharp frames captured (very blurry frames excluded).</p>
             </>
           )}
         </div>

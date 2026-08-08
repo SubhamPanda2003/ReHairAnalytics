@@ -14,6 +14,9 @@ import Results from "@/pages/Results";
 import Timeline from "@/pages/Timeline";
 import Settings from "@/pages/Settings";
 import Report from "@/pages/Report";
+import Dermatologists from "@/pages/Dermatologists";
+import DermPractice from "@/pages/DermPractice";
+import Admin from "@/pages/Admin";
 
 function AppRouter() {
   const location = useLocation();
@@ -29,6 +32,9 @@ function AppRouter() {
       <Route path="/results/:sessionId" element={<ProtectedRoute><Results /></ProtectedRoute>} />
       <Route path="/timeline" element={<ProtectedRoute><Timeline /></ProtectedRoute>} />
       <Route path="/report" element={<ProtectedRoute><Report /></ProtectedRoute>} />
+      <Route path="/dermatologists" element={<ProtectedRoute><Dermatologists /></ProtectedRoute>} />
+      <Route path="/derm" element={<ProtectedRoute><DermPractice /></ProtectedRoute>} />
+      <Route path="/admin" element={<ProtectedRoute><Admin /></ProtectedRoute>} />
       <Route path="/settings" element={<ProtectedRoute><Settings /></ProtectedRoute>} />
     </Routes>
   );

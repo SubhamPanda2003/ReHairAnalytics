@@ -6,22 +6,13 @@ import Navbar from "@/components/Navbar";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { toast } from "sonner";
-import { UploadCloud, Camera, Check, AlertTriangle, X, Loader2, Sparkles, RotateCcw, Scan, Target, Play, CircleDot } from "lucide-react";
+import { UploadCloud, Camera, Check, AlertTriangle, X, Loader2, Sparkles, RotateCcw, Scan, Target, Play, CircleDot, Zap, ZapOff } from "lucide-react";
 
 const REGIONS = [
   { key: "full", label: "Full scalp", icon: Scan, tip: "Sweep the phone slowly over your whole head." },
   { key: "crown", label: "Crown", icon: CircleDot, tip: "Tilt your head down and hover over the top-back." },
   { key: "hairline", label: "Hairline", icon: Target, tip: "Hold at forehead height, panning across the front." },
 ];
-
-const GUIDE = [
-  "Move slowly across your scalp…",
-  "Keep the light even — face a window",
-  "Cover every angle of the focus zone",
-  "Hold ~20cm away, steady hands",
-  "Almost there — keep sweeping",
-];
-
 
 const VIEWS = [
   { key: "front", label: "Front" },
@@ -153,23 +144,48 @@ function ViewSlot({ view, state, onFile, onCamera }) {
   );
 }
 
+const REGION_PARAMS = {
+  full: {
+    duration: 30, interval: 1000, target: 30,
+    guides: ["Face the camera straight on", "Slowly turn your head LEFT \u27F5", "Now turn your head RIGHT \u27F6", "Tilt your head DOWN — show the crown", "Look UP — reveal the hairline", "Turn to show the BACK of your head"],
+  },
+  crown: { duration: 24, interval: 1800, target: 13, guides: ["Tilt your head down", "Pan slowly over the crown", "Cover the top-back evenly"] },
+  hairline: { duration: 24, interval: 1800, target: 13, guides: ["Hold at forehead height", "Pan across your hairline", "Include both temples"] },
+};
+
 function AutoScan() {
   const navigate = useNavigate();
   const videoRef = useRef(null);
   const streamRef = useRef(null);
+  const trackRef = useRef(null);
   const framesRef = useRef([]);
   const [region, setRegion] = useState("full");
   const [phase, setPhase] = useState("idle"); // idle | scanning | uploading
   const [progress, setProgress] = useState(0);
   const [count, setCount] = useState(0);
-  const [guide, setGuide] = useState(GUIDE[0]);
+  const [guide, setGuide] = useState("");
+  const [torchWanted, setTorchWanted] = useState(false);
+  const [torchSupported, setTorchSupported] = useState(true);
 
-  const DURATION = 30; // seconds
-  const INTERVAL = 2200; // ms between frames
+  const P = REGION_PARAMS[region];
 
   const stopStream = () => {
     streamRef.current?.getTracks().forEach((t) => t.stop());
-    streamRef.current = null;
+    streamRef.current = null; trackRef.current = null;
+  };
+
+  const applyTorch = async (on) => {
+    const track = trackRef.current;
+    if (!track) return;
+    const caps = track.getCapabilities ? track.getCapabilities() : {};
+    if (!caps.torch) { setTorchSupported(false); toast.info("Flash isn't supported on this camera/device"); return; }
+    try { await track.applyConstraints({ advanced: [{ torch: on }] }); } catch (e) { setTorchSupported(false); }
+  };
+
+  const toggleTorch = async () => {
+    const next = !torchWanted;
+    setTorchWanted(next);
+    if (phase === "scanning") await applyTorch(next);
   };
 
   const uploadFrames = async () => {
@@ -179,7 +195,7 @@ function AutoScan() {
     fd.append("region", region);
     try {
       const res = await api.post("/scan", fd, { headers: { "Content-Type": "multipart/form-data" } });
-      toast.success(`Analyzed ${res.data.analysis.frames_used} best of ${res.data.analysis.frames_analyzed} frames`);
+      toast.success(`Analyzed ${res.data.analysis.frames_used} of ${res.data.analysis.frames_analyzed} frames (blurry ones skipped)`);
       navigate(`/results/${res.data.session_id}`);
     } catch (e) {
       toast.error(e.response?.data?.detail || "Scan analysis failed");
@@ -189,15 +205,17 @@ function AutoScan() {
 
   const start = async () => {
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "user", width: 1280, height: 1280 } });
+      const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment", width: 1280, height: 1280 } });
       streamRef.current = stream;
+      trackRef.current = stream.getVideoTracks()[0];
       if (videoRef.current) videoRef.current.srcObject = stream;
     } catch (e) {
       toast.error("Camera unavailable. Use manual upload instead.");
       return;
     }
     framesRef.current = [];
-    setCount(0); setProgress(0); setPhase("scanning");
+    setCount(0); setProgress(0); setPhase("scanning"); setGuide(P.guides[0]);
+    if (torchWanted) applyTorch(true);
 
     const v = videoRef.current;
     const canvas = document.createElement("canvas");
@@ -210,12 +228,12 @@ function AutoScan() {
       canvas.toBlob((b) => { if (b) { framesRef.current.push(b); setCount(framesRef.current.length); } }, "image/jpeg", 0.9);
     };
 
-    const capTimer = setInterval(capture, INTERVAL);
+    const capTimer = setInterval(capture, P.interval);
     setTimeout(capture, 400);
     const progTimer = setInterval(() => {
       const el = (Date.now() - started) / 1000;
-      setProgress(Math.min(100, (el / DURATION) * 100));
-      setGuide(GUIDE[Math.min(GUIDE.length - 1, Math.floor(el / (DURATION / GUIDE.length)))]);
+      setProgress(Math.min(100, (el / P.duration) * 100));
+      setGuide(P.guides[Math.min(P.guides.length - 1, Math.floor(el / (P.duration / P.guides.length)))]);
     }, 200);
 
     setTimeout(() => {
@@ -223,7 +241,7 @@ function AutoScan() {
       setProgress(100); stopStream();
       if (framesRef.current.length === 0) { toast.error("No frames captured"); setPhase("idle"); return; }
       uploadFrames();
-    }, DURATION * 1000);
+    }, P.duration * 1000);
   };
 
   useEffect(() => () => stopStream(), []);
@@ -234,7 +252,7 @@ function AutoScan() {
     <div className="grid lg:grid-cols-5 gap-6" data-testid="autoscan-panel">
       <div className="lg:col-span-2 rounded-3xl border border-border bg-card p-6">
         <h3 className="font-heading font-semibold text-lg mb-1">Choose a focus zone</h3>
-        <p className="text-sm text-muted-foreground mb-4">We measure the whole area but score this zone with extra care.</p>
+        <p className="text-sm text-muted-foreground mb-4">Full scalp captures ~30 photos across every angle. Crown & hairline zoom in on one area.</p>
         <div className="space-y-2.5">
           {REGIONS.map((rg) => (
             <button key={rg.key} onClick={() => setRegion(rg.key)} disabled={phase !== "idle"} data-testid={`region-${rg.key}`}
@@ -243,6 +261,9 @@ function AutoScan() {
               <div><p className="font-medium">{rg.label}</p><p className="text-xs text-muted-foreground">{rg.tip}</p></div>
             </button>
           ))}
+        </div>
+        <div className="mt-4 rounded-2xl bg-secondary/50 p-3 text-xs text-muted-foreground">
+          Tip: face a window or bright light. Turn on Flash if it's dim — even lighting keeps your scores reliable.
         </div>
       </div>
 
@@ -257,15 +278,27 @@ function AutoScan() {
                 strokeDasharray={circ} strokeDashoffset={circ - (progress / 100) * circ} strokeLinecap="round" style={{ transition: "stroke-dashoffset 0.2s linear" }} />
             </svg>
           )}
-          {phase === "scanning" && <span className="absolute top-3 left-1/2 -translate-x-1/2 glass text-xs px-3 py-1.5 rounded-full">{count} frames · {Math.round(progress)}%</span>}
-          {phase === "uploading" && <div className="absolute inset-0 bg-black/60 flex flex-col items-center justify-center gap-2 text-white"><Loader2 className="w-7 h-7 animate-spin" /><span className="text-sm">Analyzing best frames…</span></div>}
+          {phase === "scanning" && <span className="absolute top-3 left-1/2 -translate-x-1/2 glass text-xs px-3 py-1.5 rounded-full">{count} photos · {Math.round(progress)}%</span>}
+          {phase === "scanning" && <span className="absolute bottom-3 left-1/2 -translate-x-1/2 bg-primary text-primary-foreground text-sm font-semibold px-4 py-2 rounded-full text-center max-w-[90%]">{guide}</span>}
+          <button onClick={toggleTorch} data-testid="torch-toggle"
+            className={`absolute top-3 right-3 w-9 h-9 rounded-full flex items-center justify-center transition-colors duration-200 ${torchWanted ? "bg-primary text-primary-foreground" : "glass text-white"}`}
+            title="Toggle flash">
+            {torchWanted ? <Zap className="w-4 h-4" /> : <ZapOff className="w-4 h-4" />}
+          </button>
         </div>
 
-        <p className="text-sm text-muted-foreground mt-4 h-5 text-center">{phase === "scanning" ? guide : "You just move — the app captures automatically for 30 seconds."}</p>
+        <p className="text-sm text-muted-foreground mt-4 h-5 text-center">{phase === "idle" ? `You just move — the app auto-captures ~${P.target} photos over ${P.duration}s.` : phase === "uploading" ? "Averaging your sharpest photos…" : "Follow the on-screen directions"}</p>
 
-        <Button onClick={start} disabled={phase !== "idle"} className="rounded-full h-12 px-8 mt-4 text-base" data-testid="start-scan-btn">
-          {phase === "idle" ? <><Play className="w-5 h-5 mr-1.5" /> Start 30-second scan</> : phase === "scanning" ? <>Scanning…</> : <>Analyzing…</>}
-        </Button>
+        <div className="flex items-center gap-3 mt-4">
+          <Button onClick={start} disabled={phase !== "idle"} className="rounded-full h-12 px-8 text-base" data-testid="start-scan-btn">
+            {phase === "idle" ? <><Play className="w-5 h-5 mr-1.5" /> Start {P.duration}s scan</> : phase === "scanning" ? <>Scanning…</> : <><Loader2 className="w-5 h-5 mr-1.5 animate-spin" /> Analyzing…</>}
+          </Button>
+          {phase === "idle" && (
+            <Button variant="outline" onClick={toggleTorch} className="rounded-full h-12" data-testid="torch-btn">
+              {torchWanted ? <Zap className="w-4 h-4 mr-1.5" /> : <ZapOff className="w-4 h-4 mr-1.5" />} Flash {torchWanted ? "on" : "off"}
+            </Button>
+          )}
+        </div>
       </div>
     </div>
   );

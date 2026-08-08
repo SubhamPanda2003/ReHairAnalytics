@@ -36,6 +36,7 @@ EMERGENT_SESSION_URL = "https://demobackend.emergentagent.com/auth/v1/env/oauth/
 MAX_SIZE = 10 * 1024 * 1024
 ALLOWED_EXT = {"jpg", "jpeg", "png"}
 VIEWS = {"front", "left", "right", "top", "back"}
+SUPER_ADMIN_EMAIL = (os.environ.get("SUPER_ADMIN_EMAIL") or "").strip().lower()
 
 
 # ---------------- Auth helpers ----------------
@@ -58,7 +59,18 @@ async def get_current_user(request: Request, authorization: Optional[str] = None
     user = await db.users.find_one({"user_id": session["user_id"]}, {"_id": 0})
     if not user:
         raise HTTPException(status_code=401, detail="User not found")
+    # Ensure the fixed super admin always has the super_admin role.
+    if SUPER_ADMIN_EMAIL and (user.get("email", "").lower() == SUPER_ADMIN_EMAIL) and user.get("role") != "super_admin":
+        await db.users.update_one({"user_id": user["user_id"]}, {"$set": {"role": "super_admin"}})
+        user["role"] = "super_admin"
+    if "role" not in user:
+        user["role"] = "user"
     return user
+
+
+def require_roles(user: dict, *roles):
+    if user.get("role") not in roles:
+        raise HTTPException(status_code=403, detail="Forbidden")
 
 
 # ---------------- Models ----------------
@@ -77,6 +89,26 @@ class ProfileIn(BaseModel):
 
 class SessionIn(BaseModel):
     notes: Optional[str] = ""
+
+
+class DermRegisterIn(BaseModel):
+    name: str
+    specialty: str
+    years_experience: Optional[int] = None
+    bio: Optional[str] = ""
+    photo: Optional[str] = ""
+    meeting_link: str
+    price: Optional[str] = ""
+
+
+class AppointmentIn(BaseModel):
+    dermatologist_id: str
+    requested_time: str
+    note: Optional[str] = ""
+
+
+class RoleIn(BaseModel):
+    role: str
 
 
 def today_str() -> str:
@@ -122,16 +154,24 @@ async def auth_session(body: SessionExchange, response: Response):
     user = await db.users.find_one({"email": email}, {"_id": 0})
     if not user:
         user_id = f"user_{uuid.uuid4().hex[:12]}"
+        role = "super_admin" if (SUPER_ADMIN_EMAIL and email.lower() == SUPER_ADMIN_EMAIL) else "user"
         user = {
             "user_id": user_id,
             "email": email,
             "name": data.get("name", ""),
             "picture": data.get("picture", ""),
+            "role": role,
             "created_at": datetime.now(timezone.utc).isoformat(),
         }
         await db.users.insert_one(dict(user))
     else:
-        await db.users.update_one({"email": email}, {"$set": {"name": data.get("name", user.get("name", "")), "picture": data.get("picture", user.get("picture", ""))}})
+        upd = {"name": data.get("name", user.get("name", "")), "picture": data.get("picture", user.get("picture", ""))}
+        if SUPER_ADMIN_EMAIL and email.lower() == SUPER_ADMIN_EMAIL:
+            upd["role"] = "super_admin"
+        elif "role" not in user:
+            upd["role"] = "user"
+        await db.users.update_one({"email": email}, {"$set": upd})
+        user.update(upd)
 
     session_token = data.get("session_token") or uuid.uuid4().hex
     expires = datetime.now(timezone.utc) + timedelta(days=7)
@@ -245,8 +285,10 @@ async def finalize_day_analysis(user: dict, session_id: str, region: str):
     frames = await db.images.find({"tracking_session_id": session_id, "confidence": {"$exists": True}}, {"_id": 0}).to_list(300)
     if not frames:
         raise HTTPException(status_code=400, detail="No analyzable frames")
-    frames.sort(key=lambda f: f.get("confidence", 0), reverse=True)
-    topn = frames[: min(4, len(frames))]
+    # Use ALL frames, dropping only very blurry / unusable ones (low photographic quality).
+    BLUR_QUALITY_MIN = 40
+    usable = [f for f in frames if f.get("quality_score", 0) >= BLUR_QUALITY_MIN]
+    topn = usable if usable else frames
 
     def avg(k):
         return int(round(sum(f.get(k, 0) for f in topn) / len(topn)))
@@ -314,7 +356,7 @@ async def auto_scan(request: Request, files: List[UploadFile] = File(...), regio
     session_id = session["id"]
 
     processed = []
-    for f in files[:12]:
+    for f in files[:36]:
         raw = await f.read()
         if not raw or len(raw) > MAX_SIZE:
             continue
@@ -326,9 +368,12 @@ async def auto_scan(request: Request, files: List[UploadFile] = File(...), regio
     if not processed:
         raise HTTPException(status_code=400, detail="No valid frames captured")
 
+    sem = asyncio.Semaphore(6)
+
     async def analyze_one(i, proc):
-        b64 = image_utils.to_base64_jpeg(proc)
-        m = await ai_service.analyze_metrics(b64, "scan", f"{session_id}-{i}", region=region)
+        async with sem:
+            b64 = image_utils.to_base64_jpeg(proc)
+            m = await ai_service.analyze_metrics(b64, "scan", f"{session_id}-{i}", region=region)
         return proc, m
 
     results = await asyncio.gather(*[analyze_one(i, p) for i, p in enumerate(processed)])
@@ -576,6 +621,195 @@ async def delete_account(request: Request, response: Response, authorization: Op
     await db.users.delete_many({"user_id": uid})
     response.delete_cookie("session_token", path="/")
     return {"deleted": True}
+
+
+# ---------------- Dermatologists ----------------
+def _derm_public(d: dict, include_link: bool = False) -> dict:
+    out = {
+        "user_id": d.get("user_id"),
+        "name": d.get("name"),
+        "specialty": d.get("specialty"),
+        "years_experience": d.get("years_experience"),
+        "bio": d.get("bio"),
+        "photo": d.get("photo"),
+        "price": d.get("price"),
+        "status": d.get("status"),
+    }
+    if include_link:
+        out["meeting_link"] = d.get("meeting_link")
+    return out
+
+
+@api_router.post("/derm/register")
+async def derm_register(body: DermRegisterIn, request: Request, authorization: Optional[str] = Header(None)):
+    user = await get_current_user(request, authorization)
+    existing = await db.dermatologist_profiles.find_one({"user_id": user["user_id"]}, {"_id": 0})
+    status = existing.get("status") if existing else "pending"
+    if not existing:
+        status = "pending"
+    doc = {
+        "user_id": user["user_id"],
+        "email": user.get("email"),
+        "name": body.name,
+        "specialty": body.specialty,
+        "years_experience": body.years_experience,
+        "bio": body.bio or "",
+        "photo": body.photo or user.get("picture", ""),
+        "meeting_link": body.meeting_link,
+        "price": body.price or "",
+        "status": status,
+        "updated_at": datetime.now(timezone.utc).isoformat(),
+    }
+    if existing:
+        await db.dermatologist_profiles.update_one({"user_id": user["user_id"]}, {"$set": doc})
+    else:
+        doc["created_at"] = datetime.now(timezone.utc).isoformat()
+        await db.dermatologist_profiles.insert_one(dict(doc))
+    # promote role to dermatologist unless already admin/super_admin
+    if user.get("role") not in ("admin", "super_admin"):
+        await db.users.update_one({"user_id": user["user_id"]}, {"$set": {"role": "dermatologist"}})
+    doc.pop("_id", None)
+    return doc
+
+
+@api_router.get("/derm/me")
+async def derm_me(request: Request, authorization: Optional[str] = Header(None)):
+    user = await get_current_user(request, authorization)
+    d = await db.dermatologist_profiles.find_one({"user_id": user["user_id"]}, {"_id": 0})
+    return d or {}
+
+
+@api_router.get("/dermatologists")
+async def list_dermatologists(request: Request, authorization: Optional[str] = Header(None)):
+    await get_current_user(request, authorization)
+    docs = await db.dermatologist_profiles.find({"status": "approved"}, {"_id": 0}).to_list(500)
+    return [_derm_public(d) for d in docs]
+
+
+# ---------------- Admin ----------------
+@api_router.get("/admin/dermatologists")
+async def admin_list_derms(request: Request, status: Optional[str] = Query(None), authorization: Optional[str] = Header(None)):
+    user = await get_current_user(request, authorization)
+    require_roles(user, "admin", "super_admin")
+    q = {"status": status} if status else {}
+    docs = await db.dermatologist_profiles.find(q, {"_id": 0}).sort("created_at", -1).to_list(1000)
+    return docs
+
+
+@api_router.post("/admin/dermatologists/{derm_user_id}/approve")
+async def admin_approve_derm(derm_user_id: str, request: Request, authorization: Optional[str] = Header(None)):
+    user = await get_current_user(request, authorization)
+    require_roles(user, "admin", "super_admin")
+    r = await db.dermatologist_profiles.update_one({"user_id": derm_user_id}, {"$set": {"status": "approved"}})
+    if r.matched_count == 0:
+        raise HTTPException(status_code=404, detail="Dermatologist not found")
+    return {"status": "approved"}
+
+
+@api_router.post("/admin/dermatologists/{derm_user_id}/reject")
+async def admin_reject_derm(derm_user_id: str, request: Request, authorization: Optional[str] = Header(None)):
+    user = await get_current_user(request, authorization)
+    require_roles(user, "admin", "super_admin")
+    r = await db.dermatologist_profiles.update_one({"user_id": derm_user_id}, {"$set": {"status": "rejected"}})
+    if r.matched_count == 0:
+        raise HTTPException(status_code=404, detail="Dermatologist not found")
+    return {"status": "rejected"}
+
+
+@api_router.get("/admin/users")
+async def admin_list_users(request: Request, authorization: Optional[str] = Header(None)):
+    user = await get_current_user(request, authorization)
+    require_roles(user, "super_admin")
+    users = await db.users.find({}, {"_id": 0, "user_id": 1, "email": 1, "name": 1, "picture": 1, "role": 1}).to_list(2000)
+    for u in users:
+        u.setdefault("role", "user")
+    return users
+
+
+@api_router.post("/admin/users/{target_user_id}/role")
+async def admin_set_role(target_user_id: str, body: RoleIn, request: Request, authorization: Optional[str] = Header(None)):
+    user = await get_current_user(request, authorization)
+    require_roles(user, "super_admin")
+    if body.role not in ("user", "admin"):
+        raise HTTPException(status_code=400, detail="Role must be 'user' or 'admin'")
+    target = await db.users.find_one({"user_id": target_user_id}, {"_id": 0})
+    if not target:
+        raise HTTPException(status_code=404, detail="User not found")
+    if target.get("email", "").lower() == SUPER_ADMIN_EMAIL:
+        raise HTTPException(status_code=400, detail="Cannot change the super admin")
+    await db.users.update_one({"user_id": target_user_id}, {"$set": {"role": body.role}})
+    return {"user_id": target_user_id, "role": body.role}
+
+
+# ---------------- Appointments ----------------
+@api_router.post("/appointments")
+async def create_appointment(body: AppointmentIn, request: Request, authorization: Optional[str] = Header(None)):
+    user = await get_current_user(request, authorization)
+    derm = await db.dermatologist_profiles.find_one({"user_id": body.dermatologist_id, "status": "approved"}, {"_id": 0})
+    if not derm:
+        raise HTTPException(status_code=404, detail="Dermatologist not available")
+    doc = {
+        "id": str(uuid.uuid4()),
+        "patient_id": user["user_id"],
+        "patient_name": user.get("name", ""),
+        "patient_email": user.get("email", ""),
+        "dermatologist_id": body.dermatologist_id,
+        "derm_name": derm.get("name", ""),
+        "requested_time": body.requested_time,
+        "note": body.note or "",
+        "status": "requested",
+        "meeting_link": None,
+        "created_at": datetime.now(timezone.utc).isoformat(),
+    }
+    await db.appointments.insert_one(dict(doc))
+    doc.pop("_id", None)
+    return doc
+
+
+@api_router.get("/appointments")
+async def list_appointments(request: Request, authorization: Optional[str] = Header(None)):
+    user = await get_current_user(request, authorization)
+    as_patient = await db.appointments.find({"patient_id": user["user_id"]}, {"_id": 0}).sort("created_at", -1).to_list(500)
+    as_derm = await db.appointments.find({"dermatologist_id": user["user_id"]}, {"_id": 0}).sort("created_at", -1).to_list(500)
+    return {"as_patient": as_patient, "as_dermatologist": as_derm}
+
+
+@api_router.post("/appointments/{appt_id}/confirm")
+async def confirm_appointment(appt_id: str, request: Request, authorization: Optional[str] = Header(None)):
+    user = await get_current_user(request, authorization)
+    appt = await db.appointments.find_one({"id": appt_id}, {"_id": 0})
+    if not appt:
+        raise HTTPException(status_code=404, detail="Appointment not found")
+    if appt["dermatologist_id"] != user["user_id"]:
+        raise HTTPException(status_code=403, detail="Forbidden")
+    derm = await db.dermatologist_profiles.find_one({"user_id": user["user_id"]}, {"_id": 0})
+    link = derm.get("meeting_link") if derm else None
+    await db.appointments.update_one({"id": appt_id}, {"$set": {"status": "confirmed", "meeting_link": link}})
+    return {"status": "confirmed", "meeting_link": link}
+
+
+@api_router.post("/appointments/{appt_id}/decline")
+async def decline_appointment(appt_id: str, request: Request, authorization: Optional[str] = Header(None)):
+    user = await get_current_user(request, authorization)
+    appt = await db.appointments.find_one({"id": appt_id}, {"_id": 0})
+    if not appt:
+        raise HTTPException(status_code=404, detail="Appointment not found")
+    if appt["dermatologist_id"] != user["user_id"]:
+        raise HTTPException(status_code=403, detail="Forbidden")
+    await db.appointments.update_one({"id": appt_id}, {"$set": {"status": "declined"}})
+    return {"status": "declined"}
+
+
+@api_router.post("/appointments/{appt_id}/cancel")
+async def cancel_appointment(appt_id: str, request: Request, authorization: Optional[str] = Header(None)):
+    user = await get_current_user(request, authorization)
+    appt = await db.appointments.find_one({"id": appt_id}, {"_id": 0})
+    if not appt:
+        raise HTTPException(status_code=404, detail="Appointment not found")
+    if appt["patient_id"] != user["user_id"]:
+        raise HTTPException(status_code=403, detail="Forbidden")
+    await db.appointments.update_one({"id": appt_id}, {"$set": {"status": "cancelled"}})
+    return {"status": "cancelled"}
 
 
 @api_router.get("/")

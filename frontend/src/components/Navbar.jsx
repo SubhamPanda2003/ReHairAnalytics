@@ -2,19 +2,25 @@ import React from "react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
 import { useAuth } from "@/context/AuthContext";
 import { Button } from "@/components/ui/button";
-import { Activity, LayoutDashboard, Upload, LineChart, Settings, LogOut } from "lucide-react";
+import { Activity, LayoutDashboard, Upload, LineChart, Settings, LogOut, Stethoscope, ShieldCheck } from "lucide-react";
 
-const links = [
+const baseLinks = [
   { to: "/dashboard", label: "Dashboard", icon: LayoutDashboard, id: "nav-dashboard" },
   { to: "/upload", label: "New Scan", icon: Upload, id: "nav-upload" },
   { to: "/timeline", label: "Timeline", icon: LineChart, id: "nav-timeline" },
-  { to: "/settings", label: "Settings", icon: Settings, id: "nav-settings" },
+  { to: "/dermatologists", label: "Consult", icon: Stethoscope, id: "nav-consult" },
 ];
 
 export default function Navbar() {
   const { user, logout } = useAuth();
   const location = useLocation();
   const navigate = useNavigate();
+
+  const role = user?.role || "user";
+  const links = [...baseLinks];
+  if (role === "dermatologist") links.push({ to: "/derm", label: "Practice", icon: Stethoscope, id: "nav-practice" });
+  if (role === "admin" || role === "super_admin") links.push({ to: "/admin", label: "Admin", icon: ShieldCheck, id: "nav-admin" });
+  links.push({ to: "/settings", label: "Settings", icon: Settings, id: "nav-settings" });
 
   return (
     <header className="sticky top-0 z-50 glass border-b border-border" data-testid="app-navbar">

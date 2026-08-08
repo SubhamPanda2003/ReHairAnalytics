@@ -1,0 +1,60 @@
+{
+  "summary": "Iteration-3 testing of the roles/consultations batch + auto-scan changes. Backend: 56/56 pytest cases pass (20 legacy test_backend.py, 10 test_new_features.py, 26 NEW test_roles_consults.py). Verified super_admin-by-email on /api/auth/me, plain-user role, RBAC 403 for user on /api/admin/*, 401 unauthenticated, derm register -> pending + role flip, /derm/me, pending NOT in public /dermatologists, admin pending list, approve/reject/re-approve, public list omits meeting_link and _id, 404 on unknown derm, super_admin-only /admin/users, promote user->admin (then admin can hit /admin/dermatologists but not /admin/users), demote, 400 on changing super admin, 400 on invalid role, 404 unknown target. Appointments: request -> 'requested' (no link), 404 on unknown derm, list split as_patient/as_dermatologist, 403 when patient tries confirm/decline, derm confirm -> status confirmed + meeting_link revealed and visible to patient, patient cancel, derm decline (no link), 404 on unknown appt id, 401 unauthenticated. Auto-scan /api/scan re-verified with 6 real hair photos through gpt-5.6-terra: frames_used now equals frames_analyzed (6/6 and 9/9) confirming all non-blurry frames are averaged (BLUR_QUALITY_MIN=40); region persistence + invalid-region fallback + 400 on unusable payload still pass. Frontend (seeded session cookies, 4 role personas): Navbar role gating correct (Consult for all, Practice only for dermatologist, Admin only for admin/super_admin), /dermatologists lists only approved derms (pending derm absent), request-dialog + appt-datetime + appt-note + appt-submit works and creates a 'Requested' row, /derm shows approved status + incoming request and confirm-{id} flips to 'Meet link', patient then sees 'Confirmed' + Join button pointing at the derm's Google Meet link, /derm registration form (derm-name/derm-specialty/derm-meeting_link/derm-save-btn) submits and switches to pending status with Practice nav appearing, /admin as super_admin shows Dermatologists tab (approve-{uid} removes the pending row) and Users tab (promote/demote round-trip, no buttons rendered for super_admin rows), plain user on /admin gets the 'Admins only' guard. Upload auto-scan UI: region-full/crown/hairline present, start-scan-btn label reflects duration (30s / 24s / 24s), hint text reflects photo count (~30 / ~13), torch-toggle + torch-btn present and toggle state (Flash off -> Flash on). Real 30s camera capture not exercised (headless) per instructions.",
+  "backend_issues": {
+    "critical": [],
+    "minor": [
+      {"endpoint": "POST /api/derm/register", "issue": "An already-APPROVED dermatologist can edit name/specialty/meeting_link and keeps status 'approved' (no re-review). A bad actor could get approved with a clean profile and then swap in an arbitrary meeting link/name. Consider resetting to 'pending' (or flagging) when meeting_link/name/specialty change."},
+      {"endpoint": "POST /api/admin/users/{uid}/role", "issue": "Promoting a user whose current role is 'dermatologist' to 'admin' silently destroys the dermatologist role while their approved dermatologist_profile stays public and can still receive appointments; the Navbar 'Practice' link then disappears so they cannot manage requests from the UI. Either block role changes for dermatologists or keep derm capability independent of the role field."},
+      {"endpoint": "POST /api/auth/session", "issue": "Users are looked up by exact-case email with no unique index on users.email; DB currently holds TWO docs with email iampandasubham@gmail.com (both super_admin). Normalize email to lowercase and add a unique index."},
+      {"endpoint": "GET /api/admin/users", "issue": "Returns up to 2000 users with no pagination/search; will not scale and the /admin Users tab renders all of them in one list."},
+      {"endpoint": "POST /api/profile", "issue": "STILL OPEN from iteration_2: model_dump() writes unset fields as null, so a partial update wipes age/gender/hair_type/goals. Use exclude_unset=True."},
+      {"endpoint": "POST /api/sessions/{id}/analyze", "issue": "STILL OPEN from iteration_2: manual analyze does not carry `region` onto the analysis doc, so the Results region-badge disappears after a manual re-analyze of a scan session."}
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [
+      {"component": "Upload.jsx (New scan subtitle, line 372)", "issue": "Stale copy: 'Auto-scan sweeps ~30s of frames and reports on the 3-4 most confident.' The backend now averages ALL non-blurry frames, and the toast/other copy says otherwise. Misleading to users.", "selector": "[data-testid=\"upload-page\"] p", "priority": "LOW"}
+    ],
+    "integration_issues": [],
+    "design_issues": [
+      {"screen": "/dermatologists request-appointment dialog", "issues": ["Uses the browser-native <input type=\"datetime-local\"> picker instead of the shadcn Calendar/time control used elsewhere in the design system - inconsistent look and no validation that the requested time is in the future (a past date can be submitted)."]},
+      {"screen": "/admin Users tab", "issues": ["Flat unpaginated, unsearchable list; role badge + single action button only. Fine now, unusable at scale."]}
+    ]
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_roles_consults.py",
+    "/app/backend/tests/test_new_features.py",
+    "/app/backend/tests/test_backend.py",
+    "/app/backend/tests/conftest.py",
+    "/app/backend/tests/seed_ui.py",
+    "/app/test_reports/pytest/pytest_results.xml"
+  ],
+  "action_items": [
+    "Fix stale Upload.jsx subtitle (line 372) to describe the new all-non-blurry-frames averaging instead of 'the 3-4 most confident'.",
+    "Decide behaviour for approved derms editing their profile (re-review vs keep approved) - currently meeting_link can be changed post-approval with no re-check.",
+    "Guard role changes for dermatologist accounts (promoting a derm to admin orphans their approved profile and hides the Practice nav).",
+    "Lowercase-normalize users.email + add a unique index (duplicate super_admin docs already exist in test_database).",
+    "Carry over the two still-open iteration_2 items: POST /profile partial-update wipe, and region not persisted by /sessions/{id}/analyze.",
+    "Optional: replace the native datetime-local input in the appointment dialog with the shadcn calendar + reject past times."
+  ],
+  "critical_code_review_comments": [
+    "server.py derm_register: preserves `status` on update, so an approved derm silently re-writes meeting_link/name without re-approval. Add re-review trigger.",
+    "server.py admin_set_role: only validates the target role value, not the target's current role; dermatologist -> admin breaks the derm UX invariant (Navbar gates /derm on role === 'dermatologist' while dermatologist_profiles stays approved).",
+    "server.py auth_session: db.users.find_one({'email': email}) is case-sensitive and there is no unique index on email -> duplicate accounts (already reproduced: 2 docs for iampandasubham@gmail.com).",
+    "server.py admin_list_derms returns raw profile docs including email + meeting_link; admin-only so acceptable, but consider a projection to keep the contract explicit.",
+    "server.py finalize_day_analysis: `usable if usable else frames` means if EVERY frame is blurry, all blurry frames are averaged and the client still gets confident-looking scores with no flag. Consider returning frames_rejected / a low-quality warning.",
+    "Frontend Admin.jsx renders users without pagination; DermPractice.jsx defines the `Field` component inside render (remounts on each keystroke-driven re-render) - it works today but is a re-render/focus-loss risk; typing was verified OK in the test."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_roles_consults.py",
+    "/app/backend/tests/test_new_features.py",
+    "/app/backend/tests/seed_ui.py"
+  ],
+  "success_rate": {"backend": "100% (56/56 pytest)", "frontend": "100% of testable flows (roles nav gating, consult booking, derm confirm, admin approve/promote, derm registration, auto-scan UI). Live 30s camera capture not runnable headless."},
+  "seed_data_creation": "test_roles_consults.py seeds its own users per run (super_admin by email iampandasubham@gmail.com, plain user, derm) and deletes them in teardown. seed_ui.py seeded 5 UI personas (patient/dermok/dermpending/superadmin/fresh) + tokens into /app/test_reports/ui_seed.json; ALL of these users, their derm profiles and appointments were deleted after the UI run. NOTE: pre-existing non-TEST leftovers from the main agent's own curl testing remain in test_database: users drjane_2ab0@ex.com (approved dermatologist 'Dr Jane', visible in the public list), patient_afe3@ex.com, selftest-1786178361@ex.com, uiqa+1786176230997@example.com (role admin), and a duplicate iampandasubham@gmail.com user - clean these before shipping.",
+  "should_call_test_agent_after_fix": false,
+  "should_main_agent_self_test": true,
+  "test_credentials": "No passwords - seed users + session_token in MongoDB test_database per /app/memory/test_credentials.md; auth via session_token cookie or Bearer.",
+  "context_for_next_testing_agent": "Reuse /app/backend/tests/test_roles_consults.py for RBAC/appointments (self-contained, xdist-safe: each class seeds its own derm because pytest.ini uses -n 2 --dist loadscope so class order is not guaranteed - do NOT share a single derm across classes). Use /app/backend/tests/seed_ui.py to regenerate UI personas (/app/test_reports/ui_seed.json) then set the session_token cookie per persona with page.context.add_cookies (clear_cookies between personas). test_new_features.py now asserts frames_used == frames_analyzed (all non-blurry frames averaged). Remaining unverified: live camera auto-scan (headless-impossible) and the two carried-over iteration_2 backend items.",
+  "rca_of_the_issue": "No blocking defects. Initial 4 failures in my new test file were a TEST isolation problem (two classes shared one module-scoped derm user under xdist loadscope, so the derm was already approved before the pending assertions ran) - fixed by giving TestDermatologistLifecycle its own seeded derm; not a product bug. All product-level findings are minor/hardening items listed above."
+}

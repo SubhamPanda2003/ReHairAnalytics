@@ -83,9 +83,11 @@ class TestNewFeatures:
                   "confidence", "quality_score"):
             assert 0 <= a[k] <= 100, f"{k}={a[k]}"
         assert a["region"] == "full"
-        # top-N averaging over 6 frames -> used = min(4, 6) = 4
+        # NEW: all non-blurry frames are averaged (quality >= 40 kept)
         assert a["frames_analyzed"] == 6, f"frames_analyzed={a['frames_analyzed']}"
-        assert a["frames_used"] == 4, f"frames_used={a['frames_used']}"
+        assert a["frames_used"] == a["frames_analyzed"], (
+            f"expected all sharp fixture frames to be used, "
+            f"used={a['frames_used']} of {a['frames_analyzed']}")
         assert isinstance(a.get("ai_summary"), str) and len(a["ai_summary"]) > 20
         # baseline scan: no previous
         assert body.get("vs_previous") in (None,)
@@ -109,7 +111,7 @@ class TestNewFeatures:
         a = body["analysis"]
         # 6 previous frames + 3 new = 9
         assert a["frames_analyzed"] == 9, f"frames_analyzed={a['frames_analyzed']}"
-        assert a["frames_used"] == 4, f"frames_used={a['frames_used']}"
+        assert a["frames_used"] == a["frames_analyzed"], f"frames_used={a['frames_used']}"
         print(f"scan#2 same session, frames_analyzed={a['frames_analyzed']}, "
               f"frames_used={a['frames_used']}")
 

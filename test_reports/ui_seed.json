@@ -1,0 +1,23 @@
+{
+  "patient": {
+    "user_id": "TEST_ui-patient-1786181046037-a91d15",
+    "token": "test_session_ui_patient_1786181046037_7f4bb5"
+  },
+  "dermok": {
+    "user_id": "TEST_ui-dermok-1786181046040-48d2e6",
+    "token": "test_session_ui_dermok_1786181046040_d9e7e0"
+  },
+  "dermpending": {
+    "user_id": "TEST_ui-dermpending-1786181046040-c4df95",
+    "token": "test_session_ui_dermpending_1786181046040_d8ca9e"
+  },
+  "superadmin": {
+    "user_id": "TEST_ui-superadmin-1786181046040-639969",
+    "token": "test_session_ui_superadmin_1786181046040_967a91"
+  },
+  "fresh": {
+    "user_id": "TEST_ui-fresh-1786181046041-6aa91b",
+    "token": "test_session_ui_fresh_1786181046041_563f4a"
+  },
+  "base_url": "https://growth-timeline-6.preview.emergentagent.com"
+}
