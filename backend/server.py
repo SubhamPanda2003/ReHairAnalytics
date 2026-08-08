@@ -312,10 +312,32 @@ async def finalize_day_analysis(user: dict, session_id: str, region: str):
     frames = await db.images.find({"tracking_session_id": session_id, "confidence": {"$exists": True}}, {"_id": 0}).to_list(300)
     if not frames:
         raise HTTPException(status_code=400, detail="No analyzable frames")
-    # Use ALL frames, dropping only very blurry / unusable ones (low photographic quality).
     BLUR_QUALITY_MIN = 40
-    usable = [f for f in frames if f.get("quality_score", 0) >= BLUR_QUALITY_MIN]
-    topn = usable if usable else frames
+    usable = [f for f in frames if f.get("quality_score", 0) >= BLUR_QUALITY_MIN] or frames
+
+    METRIC_KEYS = ["hairline_score", "density_score", "coverage_score", "overall_score",
+                   "confidence", "quality_score", "visible_scalp_pct", "hair_coverage_pct"]
+
+    # Group usable frames by their captured (sub-)region.
+    by_region = {}
+    for f in usable:
+        by_region.setdefault(f.get("region", region), []).append(f)
+
+    per_region = {}
+    if len(by_region) <= 1:
+        # Single region (crown / hairline / full-with-no-subtags): average the most confident frames.
+        only = list(by_region.values())[0] if by_region else usable
+        only = sorted(only, key=lambda x: x.get("confidence", 0), reverse=True)
+        topn = only[: min(4, len(only))]
+        reg_key = list(by_region.keys())[0] if by_region else region
+        per_region[reg_key] = {k: int(round(sum(f.get(k, 0) for f in topn) / len(topn))) for k in METRIC_KEYS}
+    else:
+        # Full scan: pick the single best-confidence frame per region, then blend those.
+        topn = []
+        for reg, fl in by_region.items():
+            best = max(fl, key=lambda x: x.get("confidence", 0))
+            topn.append(best)
+            per_region[reg] = {k: best.get(k, 0) for k in METRIC_KEYS}
 
     def avg(k):
         return int(round(sum(f.get(k, 0) for f in topn) / len(topn)))
@@ -346,6 +368,7 @@ async def finalize_day_analysis(user: dict, session_id: str, region: str):
         **metrics,
         "quality_score": avg("quality_score"),
         "region": region,
+        "per_region": per_region,
         "frames_analyzed": len(frames),
         "frames_used": len(topn),
         "ai_summary": summary,
@@ -375,21 +398,23 @@ async def finalize_day_analysis(user: dict, session_id: str, region: str):
 
 
 @api_router.post("/scan")
-async def auto_scan(request: Request, files: List[UploadFile] = File(...), region: str = Form("full"), authorization: Optional[str] = Header(None)):
+async def auto_scan(request: Request, files: List[UploadFile] = File(...), region: str = Form("full"), frame_regions: List[str] = Form([]), authorization: Optional[str] = Header(None)):
     user = await get_current_user(request, authorization)
     if region not in ("full", "crown", "hairline"):
         region = "full"
     session = await get_or_create_today_session(user["user_id"])
     session_id = session["id"]
 
-    processed = []
-    for f in files[:36]:
+    regions_in = frame_regions or []
+    processed = []  # list of (proc, sub_region)
+    for i, f in enumerate(files[:36]):
         raw = await f.read()
         if not raw or len(raw) > MAX_SIZE:
             continue
+        sub = regions_in[i] if i < len(regions_in) else region
         try:
             proc, _ = await asyncio.to_thread(image_utils.process_image, raw)
-            processed.append(proc)
+            processed.append((proc, sub))
         except Exception:
             continue
     if not processed:
@@ -397,15 +422,15 @@ async def auto_scan(request: Request, files: List[UploadFile] = File(...), regio
 
     sem = asyncio.Semaphore(6)
 
-    async def analyze_one(i, proc):
+    async def analyze_one(i, proc, sub):
         async with sem:
             b64 = await asyncio.to_thread(image_utils.to_base64_jpeg, proc)
-            m = await ai_service.analyze_metrics(b64, "scan", f"{session_id}-{i}", region=region)
-        return proc, m
+            m = await ai_service.analyze_metrics(b64, "scan", f"{session_id}-{i}", region=sub)
+        return proc, sub, m
 
-    results = await asyncio.gather(*[analyze_one(i, p) for i, p in enumerate(processed)])
+    results = await asyncio.gather(*[analyze_one(i, p, sub) for i, (p, sub) in enumerate(processed)])
 
-    for proc, m in results:
+    for proc, sub, m in results:
         img_id = str(uuid.uuid4())
         base = f"{store.APP_NAME}/uploads/{user['user_id']}/{img_id}"
         r1 = await asyncio.to_thread(store.put_object, f"{base}.jpg", proc, "image/jpeg")
@@ -416,7 +441,7 @@ async def auto_scan(request: Request, files: List[UploadFile] = File(...), regio
             "tracking_session_id": session_id,
             "user_id": user["user_id"],
             "view": "scan",
-            "region": region,
+            "region": sub,
             "storage_path": r1["path"],
             "thumb_path": f"{base}_thumb.jpg",
             "quality_score": m["quality"],

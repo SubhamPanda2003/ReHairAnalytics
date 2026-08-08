@@ -1,0 +1,18 @@
+{
+  "base_url": "https://growth-timeline-6.preview.emergentagent.com",
+  "patient": {
+    "user_id": "TEST_rui-patient-1786188668757-2ef8aa",
+    "token": "test_session_rui_patient_1786188668757_52a08a",
+    "session_id": "91777352-698e-47a3-96d9-394148bcf5c9",
+    "per_region": [
+      "front",
+      "left",
+      "right",
+      "hairline"
+    ]
+  },
+  "superadmin": {
+    "user_id": "TEST_rui-superadmin-1786188696334-ad35ea",
+    "token": "test_session_rui_superadmin_1786188696334_76e3f0"
+  }
+}

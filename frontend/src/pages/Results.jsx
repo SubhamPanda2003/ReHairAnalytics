@@ -90,6 +90,27 @@ export default function Results() {
               </div>
             </motion.div>
 
+            {/* Per-region breakdown */}
+            {a.per_region && Object.keys(a.per_region).length > 1 && (
+              <motion.div initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.08 }}
+                className="rounded-3xl border border-border bg-card p-6 md:p-8 mb-6" data-testid="per-region">
+                <h3 className="font-heading font-semibold text-lg mb-1">Per-region breakdown</h3>
+                <p className="text-sm text-muted-foreground mb-4">Best photo picked from each area of your scalp.</p>
+                <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+                  {Object.entries(a.per_region).map(([reg, m]) => (
+                    <div key={reg} className="rounded-2xl border border-border p-4" data-testid={`region-metric-${reg}`}>
+                      <p className="capitalize font-heading font-semibold">{reg}</p>
+                      <div className="text-xs text-muted-foreground mt-2 space-y-1.5">
+                        <div className="flex justify-between">Density <b className="text-foreground">{m.density_score}</b></div>
+                        <div className="flex justify-between">Coverage <b className="text-foreground">{m.coverage_score}</b></div>
+                        <div className="flex justify-between">Hairline <b className="text-foreground">{m.hairline_score}</b></div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </motion.div>
+            )}
+
             {/* AI summary */}
             <motion.div initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.1 }}
               className="rounded-3xl border border-primary/30 bg-card p-6 md:p-8 mb-6" data-testid="ai-summary">

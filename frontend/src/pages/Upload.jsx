@@ -146,11 +146,12 @@ function ViewSlot({ view, state, onFile, onCamera }) {
 
 const REGION_PARAMS = {
   full: {
-    duration: 30, interval: 1000, target: 30,
+    duration: 30, interval: 1000, target: 6,
     guides: ["Face the camera straight on", "Slowly turn your head LEFT \u27F5", "Now turn your head RIGHT \u27F6", "Tilt your head DOWN — show the crown", "Look UP — reveal the hairline", "Turn to show the BACK of your head"],
+    regionMap: ["front", "left", "right", "crown", "hairline", "back"],
   },
-  crown: { duration: 24, interval: 1800, target: 13, guides: ["Tilt your head down", "Pan slowly over the crown", "Cover the top-back evenly"] },
-  hairline: { duration: 24, interval: 1800, target: 13, guides: ["Hold at forehead height", "Pan across your hairline", "Include both temples"] },
+  crown: { duration: 24, interval: 1800, target: 4, guides: ["Tilt your head down", "Pan slowly over the crown", "Cover the top-back evenly"], regionMap: null },
+  hairline: { duration: 24, interval: 1800, target: 4, guides: ["Hold at forehead height", "Pan across your hairline", "Include both temples"], regionMap: null },
 };
 
 function AutoScan() {
@@ -180,12 +181,24 @@ function AutoScan() {
 
   const uploadFrames = async () => {
     setPhase("uploading");
+    // Pick the best (sharpest) frame per region for a full scan; else the sharpest few.
+    let selected;
+    if (region === "full") {
+      const byRegion = {};
+      framesRef.current.forEach((f) => { if (!byRegion[f.region] || f.sharp > byRegion[f.region].sharp) byRegion[f.region] = f; });
+      selected = Object.values(byRegion);
+    } else {
+      selected = [...framesRef.current].sort((a, b) => b.sharp - a.sharp).slice(0, 4);
+    }
+    if (selected.length === 0) selected = framesRef.current.slice(0, 1);
+
     const fd = new FormData();
-    framesRef.current.forEach((blob, i) => fd.append("files", blob, `frame_${i}.jpg`));
+    selected.forEach((f, i) => { fd.append("files", f.blob, `frame_${i}.jpg`); fd.append("frame_regions", f.region); });
     fd.append("region", region);
     try {
       const res = await api.post("/scan", fd, { headers: { "Content-Type": "multipart/form-data" } });
-      toast.success(`Analyzed ${res.data.analysis.frames_used} of ${res.data.analysis.frames_analyzed} frames (blurry ones skipped)`);
+      const a = res.data.analysis;
+      toast.success(region === "full" ? `Analyzed best photo from ${a.frames_used} regions` : `Analyzed ${a.frames_used} of ${a.frames_analyzed} photos`);
       navigate(`/results/${res.data.session_id}`);
     } catch (e) {
       toast.error(e.response?.data?.detail || "Scan analysis failed");
@@ -206,13 +219,35 @@ function AutoScan() {
     setCount(0); setProgress(0); setGuide(P.guides[0]); setPhase("scanning");
 
     const canvas = document.createElement("canvas");
+    const sharpCanvas = document.createElement("canvas");
+    sharpCanvas.width = 96; sharpCanvas.height = 96;
     const started = Date.now();
+
+    const sharpness = () => {
+      const v = videoRef.current;
+      if (!v || !v.videoWidth) return 0;
+      const ctx = sharpCanvas.getContext("2d");
+      ctx.drawImage(v, 0, 0, 96, 96);
+      const d = ctx.getImageData(0, 0, 96, 96).data;
+      let sum = 0, prev = 0;
+      for (let i = 0; i < d.length; i += 4) {
+        const g = d[i] * 0.299 + d[i + 1] * 0.587 + d[i + 2] * 0.114;
+        if (i > 0) { const df = g - prev; sum += df * df; }
+        prev = g;
+      }
+      return sum;
+    };
+
     const capture = () => {
       const v = videoRef.current;
       if (!v || !v.videoWidth) return;
+      const el = (Date.now() - started) / 1000;
+      const seg = Math.min(P.guides.length - 1, Math.floor(el / (P.duration / P.guides.length)));
+      const fr = P.regionMap ? P.regionMap[seg] : region;
+      const sharp = sharpness();
       canvas.width = v.videoWidth; canvas.height = v.videoHeight;
       canvas.getContext("2d").drawImage(v, 0, 0);
-      canvas.toBlob((b) => { if (b) { framesRef.current.push(b); setCount(framesRef.current.length); } }, "image/jpeg", 0.9);
+      canvas.toBlob((b) => { if (b) { framesRef.current.push({ blob: b, region: fr, sharp }); setCount(framesRef.current.length); } }, "image/jpeg", 0.9);
     };
 
     timersRef.current.cap = setInterval(capture, P.interval);
@@ -281,7 +316,7 @@ function AutoScan() {
               <p className="text-xs text-muted-foreground">Selfie camera preview<br />appears full-screen on start</p>
             </div>
           </div>
-          <p className="text-sm text-muted-foreground mt-4 text-center">You just move — the app auto-captures ~{P.target} photos over {P.duration}s.</p>
+          <p className="text-sm text-muted-foreground mt-4 text-center">Move for {P.duration}s while it captures — we keep the sharpest photo of each area.</p>
           <div className="flex items-center gap-3 mt-4">
             <Button onClick={start} className="rounded-full h-12 px-8 text-base" data-testid="start-scan-btn">
               <Play className="w-5 h-5 mr-1.5" /> Start {P.duration}s scan
