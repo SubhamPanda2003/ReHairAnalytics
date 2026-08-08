@@ -241,6 +241,14 @@ function AutoScan() {
     }
   }, [phase]);
 
+  // Escape cancels an in-progress scan.
+  useEffect(() => {
+    if (phase !== "scanning") return;
+    const onKey = (e) => { if (e.key === "Escape") cancel(); };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [phase]);
+
   useEffect(() => () => { clearTimers(); stopStream(); }, []);
 
   const size = 300, stroke = 9, r = (size - stroke) / 2, circ = 2 * Math.PI * r;
@@ -300,7 +308,7 @@ function AutoScan() {
           {phase === "scanning" ? (
             <>
               <p className="text-2xl font-heading font-bold text-center max-w-md" data-testid="scan-guide">{guide}</p>
-              <p className="text-sm opacity-70">{count} photos · {Math.round(progress)}%</p>
+              <p className="text-sm font-medium">{count} photos · {Math.round(progress)}%</p>
               <div className="flex items-center gap-3">
                 <Button variant="outline" onClick={() => setScreenLight((v) => !v)} className={`rounded-full h-11 ${screenLight ? "" : "bg-white/10 border-white/30 text-white hover:bg-white/20"}`} data-testid="light-toggle">
                   {screenLight ? <Sun className="w-4 h-4 mr-1.5" /> : <SunDim className="w-4 h-4 mr-1.5" />} Light {screenLight ? "on" : "off"}
