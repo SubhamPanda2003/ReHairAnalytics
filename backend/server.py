@@ -157,7 +157,9 @@ async def best_image_path(session_id: str) -> Optional[str]:
 # ---------------- Auth routes ----------------
 @api_router.post("/auth/session")
 async def auth_session(body: SessionExchange, response: Response):
-    resp = http_requests.get(EMERGENT_SESSION_URL, headers={"X-Session-ID": body.session_id}, timeout=30)
+    resp = await asyncio.to_thread(
+        lambda: http_requests.get(EMERGENT_SESSION_URL, headers={"X-Session-ID": body.session_id}, timeout=30)
+    )
     if resp.status_code != 200:
         raise HTTPException(status_code=401, detail="Invalid session id")
     data = resp.json()
