@@ -5,6 +5,7 @@ import { motion } from "framer-motion";
 import { api } from "@/lib/api";
 import { useAuth } from "@/context/AuthContext";
 import Navbar from "@/components/Navbar";
+import StatusPill from "@/components/StatusPill";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -14,10 +15,11 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "
 import { toast } from "sonner";
 import { Stethoscope, Video, Clock, BadgeCheck, Loader2, CalendarPlus, ExternalLink, UserPlus } from "lucide-react";
 
-const StatusBadge = ({ status }) => {
-  const map = { requested: ["Requested", "bg-amber-500/15 text-amber-600"], confirmed: ["Confirmed", "bg-primary/15 text-primary"], declined: ["Declined", "bg-destructive/15 text-destructive"], cancelled: ["Cancelled", "bg-muted text-muted-foreground"] };
-  const [label, cls] = map[status] || [status, "bg-muted"];
-  return <span className={`text-xs font-semibold px-2.5 py-1 rounded-full ${cls}`}>{label}</span>;
+const APPOINTMENT_STATUS_LABELS = {
+  requested: ["Requested", "bg-amber-500/15 text-amber-600"],
+  confirmed: ["Confirmed", "bg-primary/15 text-primary"],
+  declined: ["Declined", "bg-destructive/15 text-destructive"],
+  cancelled: ["Cancelled", "bg-muted text-muted-foreground"],
 };
 
 export default function Dermatologists() {
@@ -108,7 +110,7 @@ export default function Dermatologists() {
                   <p className="text-xs text-muted-foreground flex items-center gap-1"><Clock className="w-3.5 h-3.5" /> {new Date(a.requested_time).toLocaleString()}</p>
                 </div>
                 <div className="flex items-center gap-3">
-                  <StatusBadge status={a.status} />
+                  <StatusPill value={a.status} labels={APPOINTMENT_STATUS_LABELS} />
                   {a.status === "confirmed" && a.meeting_link && (
                     <a href={a.meeting_link} target="_blank" rel="noreferrer" data-testid={`join-${a.id}`}>
                       <Button size="sm" className="rounded-full"><Video className="w-4 h-4 mr-1.5" /> Join <ExternalLink className="w-3.5 h-3.5 ml-1" /></Button>

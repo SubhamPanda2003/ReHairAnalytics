@@ -4,16 +4,18 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "@/lib/api";
 import { useAuth } from "@/context/AuthContext";
 import Navbar from "@/components/Navbar";
+import StatusPill from "@/components/StatusPill";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { toast } from "sonner";
 import { ShieldCheck, Check, X, Loader2, Stethoscope, UserCog, Crown } from "lucide-react";
 
-const roleBadge = (role) => {
-  const map = { super_admin: ["Super admin", "bg-primary/15 text-primary"], admin: ["Admin", "bg-accent text-accent-foreground"], dermatologist: ["Dermatologist", "bg-amber-500/15 text-amber-600"], user: ["User", "bg-muted text-muted-foreground"] };
-  const [label, cls] = map[role] || [role, "bg-muted"];
-  return <span className={`text-xs font-semibold px-2.5 py-1 rounded-full ${cls}`}>{label}</span>;
+const ROLE_LABELS = {
+  super_admin: ["Super admin", "bg-primary/15 text-primary"],
+  admin: ["Admin", "bg-accent text-accent-foreground"],
+  dermatologist: ["Dermatologist", "bg-amber-500/15 text-amber-600"],
+  user: ["User", "bg-muted text-muted-foreground"],
 };
 
 export default function Admin() {
@@ -120,7 +122,7 @@ export default function Admin() {
                       <div><p className="font-medium">{u.name || u.email}</p><p className="text-xs text-muted-foreground">{u.email}</p></div>
                     </div>
                     <div className="flex items-center gap-2">
-                      {roleBadge(u.role)}
+                      <StatusPill value={u.role} labels={ROLE_LABELS} />
                       {u.role !== "super_admin" && (u.role === "admin"
                         ? <Button size="sm" variant="outline" className="rounded-full" onClick={() => setRole(u.user_id, "user")} data-testid={`demote-${u.user_id}`}>Remove admin</Button>
                         : <Button size="sm" className="rounded-full" onClick={() => setRole(u.user_id, "admin")} data-testid={`promote-${u.user_id}`}>Make admin</Button>)}
