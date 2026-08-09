@@ -155,6 +155,15 @@ async def upload_image(session_id: str, user: CurrentUser, file: UploadFile = Fi
     return {"rejected": False, **doc}
 
 
+@router.delete("/images/{image_id}")
+async def delete_image(image_id: str, user: CurrentUser):
+    img = await db.images.find_one({"id": image_id, "user_id": user["user_id"]}, {"_id": 0})
+    if not img:
+        raise HTTPException(status_code=404, detail="Image not found")
+    await db.images.delete_one({"id": image_id, "user_id": user["user_id"]})
+    return {"deleted": True, "id": image_id}
+
+
 @router.post("/sessions/{session_id}/analyze")
 async def analyze_session(session_id: str, user: CurrentUser):
     s = await db.tracking_sessions.find_one({"id": session_id, "user_id": user["user_id"]}, {"_id": 0})

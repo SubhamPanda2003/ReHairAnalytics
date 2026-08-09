@@ -1,12 +1,17 @@
-import React from "react";
+import React, { useState } from "react";
 import { useParams, useNavigate } from "react-router-dom";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient, useMutation } from "@tanstack/react-query";
 import { motion } from "framer-motion";
 import { api, fileUrl } from "@/lib/api";
 import Navbar from "@/components/Navbar";
 import ScoreRing from "@/components/ScoreRing";
 import { Button } from "@/components/ui/button";
-import { ArrowLeft, Sparkles, TrendingUp, TrendingDown, Minus, Loader2, FileText, Target } from "lucide-react";
+import {
+  AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription,
+  AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
+import { toast } from "sonner";
+import { ArrowLeft, Sparkles, TrendingUp, TrendingDown, Minus, Loader2, FileText, Target, Trash2 } from "lucide-react";
 
 const fetchSession = async (id) => (await api.get(`/sessions/${id}`)).data;
 
@@ -44,7 +49,19 @@ const ComparisonCard = ({ title, ref, a }) => {
 export default function Results() {
   const { sessionId } = useParams();
   const navigate = useNavigate();
+  const qc = useQueryClient();
   const { data: s, isLoading } = useQuery({ queryKey: ["session", sessionId], queryFn: () => fetchSession(sessionId) });
+  const [toDelete, setToDelete] = useState(null);
+
+  const deleteImage = useMutation({
+    mutationFn: (imageId) => api.delete(`/images/${imageId}`),
+    onSuccess: () => {
+      toast.success("Photo deleted");
+      qc.invalidateQueries({ queryKey: ["session", sessionId] });
+      qc.invalidateQueries({ queryKey: ["timeline"] });
+    },
+    onError: (e) => toast.error(e.response?.data?.detail || "Could not delete photo"),
+  });
 
   if (isLoading) return <div className="min-h-screen bg-background"><Navbar /><div className="flex justify-center py-24"><Loader2 className="w-7 h-7 animate-spin text-primary" /></div></div>;
 
@@ -151,8 +168,16 @@ export default function Results() {
               <h3 className="font-heading font-semibold mb-4">Captured views</h3>
               <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-5 gap-3">
                 {s.images?.map((img) => (
-                  <div key={img.id} className="rounded-xl overflow-hidden border border-border">
+                  <div key={img.id} className="relative rounded-xl overflow-hidden border border-border" data-testid={`gallery-image-${img.id}`}>
                     <img src={fileUrl(img.thumb_path)} alt={img.view} className="w-full aspect-square object-cover" />
+                    <button
+                      onClick={() => setToDelete(img)}
+                      className="absolute top-1.5 right-1.5 w-7 h-7 rounded-full bg-black/60 text-white flex items-center justify-center hover:bg-destructive transition-colors duration-200"
+                      aria-label={`Delete ${img.view} photo`}
+                      data-testid={`delete-image-${img.id}`}
+                    >
+                      <Trash2 className="w-3.5 h-3.5" />
+                    </button>
                     <p className="text-xs text-center py-1.5 capitalize text-muted-foreground">{img.view} · Q{img.quality_score}</p>
                   </div>
                 ))}
@@ -161,6 +186,27 @@ export default function Results() {
           </>
         )}
       </main>
+
+      <AlertDialog open={!!toDelete} onOpenChange={(o) => !o && setToDelete(null)}>
+        <AlertDialogContent className="rounded-3xl">
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete this photo?</AlertDialogTitle>
+            <AlertDialogDescription>
+              This permanently removes the {toDelete?.view} photo from this scan. This cannot be undone.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel className="rounded-full" data-testid="delete-image-cancel">Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={() => { deleteImage.mutate(toDelete.id); setToDelete(null); }}
+              className="rounded-full bg-destructive text-destructive-foreground hover:bg-destructive/90"
+              data-testid="delete-image-confirm"
+            >
+              Delete
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }
