@@ -27,8 +27,9 @@ const Card = ({ children, className = "", delay = 0, ...rest }) => (
 export default function Dashboard() {
   const navigate = useNavigate();
   const { user } = useAuth();
-  const { data: progress, isLoading } = useQuery({ queryKey: ["progress"], queryFn: fetchProgress });
-  const { data: timeline } = useQuery({ queryKey: ["timeline"], queryFn: fetchTimeline });
+  const { data: progress, isLoading: progressLoading } = useQuery({ queryKey: ["progress"], queryFn: fetchProgress });
+  const { data: timeline, isLoading: timelineLoading } = useQuery({ queryKey: ["timeline"], queryFn: fetchTimeline });
+  const isLoading = progressLoading || timelineLoading;
 
   const points = progress?.points || [];
   const latest = progress?.latest;
@@ -159,7 +160,7 @@ export default function Dashboard() {
                 <Button variant="ghost" size="sm" onClick={() => navigate("/timeline")} className="rounded-full" data-testid="view-timeline-btn">View all <ArrowRight className="w-4 h-4 ml-1" /></Button>
               </div>
               <div className="flex gap-4 overflow-x-auto pb-2">
-                {[...timeline].reverse().map((s) => (
+                {[...(timeline || [])].reverse().map((s) => (
                   <button key={s.id} onClick={() => navigate(`/results/${s.id}`)} data-testid={`milestone-${s.week_number}`}
                     className="min-w-[160px] rounded-2xl border border-border overflow-hidden text-left hover:-translate-y-1 transition-transform duration-200 bg-secondary/40">
                     {s.images?.[0] ? <img src={fileUrl(s.images[0].thumb_path)} alt="" className="w-full h-24 object-cover" /> : <div className="w-full h-24 bg-muted" />}
