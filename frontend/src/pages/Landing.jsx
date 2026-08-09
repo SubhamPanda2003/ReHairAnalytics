@@ -3,7 +3,7 @@ import { motion } from "framer-motion";
 import { useNavigate } from "react-router-dom";
 import { useAuth } from "@/context/AuthContext";
 import { Button } from "@/components/ui/button";
-import { Activity, Camera, LineChart, ShieldCheck, Sparkles, Ruler, Clock, ArrowRight, Check } from "lucide-react";
+import { Activity, Camera, LineChart, ShieldCheck, Sparkles, Ruler, Clock, ArrowRight, Check, Stethoscope } from "lucide-react";
 
 // REMINDER: DO NOT HARDCODE THE URL, OR ADD ANY FALLBACKS OR REDIRECT URLS, THIS BREAKS THE AUTH
 const login = () => {
@@ -64,6 +64,9 @@ export default function Landing() {
             <div className="mt-8 flex flex-wrap items-center gap-3">
               <Button size="lg" onClick={login} data-testid="hero-cta-btn" className="rounded-full h-12 px-7 text-base">
                 Start tracking free <ArrowRight className="w-4 h-4 ml-1" />
+              </Button>
+              <Button size="lg" variant="outline" onClick={login} data-testid="hero-consult-btn" className="rounded-full h-12 px-7 text-base">
+                <Stethoscope className="w-4 h-4 mr-1.5" /> Consult a dermatologist
               </Button>
               <span className="text-sm text-muted-foreground">No credit card · Google sign-in</span>
             </div>
