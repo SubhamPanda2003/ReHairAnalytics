@@ -19,8 +19,28 @@ export default function useAutoScan() {
   const [count, setCount] = useState(0);
   const [guide, setGuide] = useState("");
   const [screenLight, setScreenLight] = useState(true);
+  const [voiceOn, setVoiceOnState] = useState(true);
+  const voiceOnRef = useRef(true);
 
   const params = REGION_PARAMS[region];
+
+  // Mirrored into a ref so the scan-loop's setInterval callback (a closure captured
+  // once per `start()` call) always reads the latest toggle, not a stale one.
+  const setVoiceOn = (value) => {
+    setVoiceOnState((prev) => {
+      const next = typeof value === "function" ? value(prev) : value;
+      voiceOnRef.current = next;
+      return next;
+    });
+  };
+
+  const speak = (text) => {
+    if (!voiceOnRef.current || !("speechSynthesis" in window)) return;
+    try {
+      window.speechSynthesis.cancel();
+      window.speechSynthesis.speak(new SpeechSynthesisUtterance(text.replace(/[⟵⟶]/g, "").trim()));
+    } catch (e) {}
+  };
 
   const stopStream = () => {
     streamRef.current?.getTracks().forEach((t) => t.stop());
@@ -71,6 +91,8 @@ export default function useAutoScan() {
     streamRef.current = stream;
     framesRef.current = [];
     setCount(0); setProgress(0); setGuide(params.guides[0]); setPhase("scanning");
+    speak(params.guides[0]);
+    let lastSegment = 0;
 
     const canvas = document.createElement("canvas");
     const sharpCanvas = document.createElement("canvas");
@@ -109,7 +131,12 @@ export default function useAutoScan() {
     timersRef.current.prog = setInterval(() => {
       const el = (Date.now() - started) / 1000;
       setProgress(Math.min(100, (el / params.duration) * 100));
-      setGuide(params.guides[Math.min(params.guides.length - 1, Math.floor(el / (params.duration / params.guides.length)))]);
+      const seg = Math.min(params.guides.length - 1, Math.floor(el / (params.duration / params.guides.length)));
+      setGuide(params.guides[seg]);
+      if (seg !== lastSegment) {
+        lastSegment = seg;
+        speak(params.guides[seg]);
+      }
     }, 200);
     timersRef.current.final = setTimeout(() => {
       clearTimers(); setProgress(100); stopStream();
@@ -120,6 +147,7 @@ export default function useAutoScan() {
 
   const cancel = () => {
     clearTimers(); stopStream();
+    if ("speechSynthesis" in window) window.speechSynthesis.cancel();
     framesRef.current = []; setCount(0); setProgress(0); setPhase("idle");
   };
 
@@ -140,7 +168,13 @@ export default function useAutoScan() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [phase]);
 
-  useEffect(() => () => { clearTimers(); stopStream(); }, []);
+  useEffect(() => () => {
+    clearTimers(); stopStream();
+    if ("speechSynthesis" in window) window.speechSynthesis.cancel();
+  }, []);
 
-  return { videoRef, region, setRegion, phase, progress, count, guide, screenLight, setScreenLight, params, start, cancel };
+  return {
+    videoRef, region, setRegion, phase, progress, count, guide, params, start, cancel,
+    screenLight, setScreenLight, voiceOn, setVoiceOn,
+  };
 }

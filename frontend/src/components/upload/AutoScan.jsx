@@ -1,5 +1,5 @@
 import { Button } from "@/components/ui/button";
-import { Camera, Loader2, Play, Sun, SunDim, X } from "lucide-react";
+import { Camera, Loader2, Play, Sun, SunDim, Volume2, VolumeX, X } from "lucide-react";
 import useAutoScan from "@/hooks/useAutoScan";
 import { REGIONS } from "./constants";
 import Silhouette from "./Silhouette";
@@ -7,7 +7,7 @@ import Silhouette from "./Silhouette";
 export default function AutoScan() {
   const {
     videoRef, region, setRegion, phase, progress, count, guide,
-    screenLight, setScreenLight, params, start, cancel,
+    screenLight, setScreenLight, voiceOn, setVoiceOn, params, start, cancel,
   } = useAutoScan();
 
   const size = 300, stroke = 9, r = (size - stroke) / 2, circ = 2 * Math.PI * r;
@@ -48,6 +48,9 @@ export default function AutoScan() {
             <Button variant="outline" onClick={() => setScreenLight((v) => !v)} className="rounded-full h-12" data-testid="light-btn">
               {screenLight ? <Sun className="w-4 h-4 mr-1.5" /> : <SunDim className="w-4 h-4 mr-1.5" />} Screen light {screenLight ? "on" : "off"}
             </Button>
+            <Button variant="outline" onClick={() => setVoiceOn((v) => !v)} className="rounded-full h-12" data-testid="voice-btn">
+              {voiceOn ? <Volume2 className="w-4 h-4 mr-1.5" /> : <VolumeX className="w-4 h-4 mr-1.5" />} Voice prompts {voiceOn ? "on" : "off"}
+            </Button>
           </div>
         </div>
       </div>
@@ -71,6 +74,9 @@ export default function AutoScan() {
               <div className="flex items-center gap-3">
                 <Button variant="outline" onClick={() => setScreenLight((v) => !v)} className={`rounded-full h-11 ${screenLight ? "" : "bg-white/10 border-white/30 text-white hover:bg-white/20"}`} data-testid="light-toggle">
                   {screenLight ? <Sun className="w-4 h-4 mr-1.5" /> : <SunDim className="w-4 h-4 mr-1.5" />} Light {screenLight ? "on" : "off"}
+                </Button>
+                <Button variant="outline" onClick={() => setVoiceOn((v) => !v)} className={`rounded-full h-11 ${screenLight ? "" : "bg-white/10 border-white/30 text-white hover:bg-white/20"}`} data-testid="voice-toggle">
+                  {voiceOn ? <Volume2 className="w-4 h-4 mr-1.5" /> : <VolumeX className="w-4 h-4 mr-1.5" />} Voice {voiceOn ? "on" : "off"}
                 </Button>
                 <Button variant="ghost" onClick={cancel} className={`rounded-full h-11 ${screenLight ? "" : "text-white hover:bg-white/10"}`} data-testid="cancel-scan-btn">
                   <X className="w-4 h-4 mr-1.5" /> Cancel
