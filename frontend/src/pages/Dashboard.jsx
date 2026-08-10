@@ -7,17 +7,11 @@ import { useAuth } from "@/context/AuthContext";
 import Navbar from "@/components/Navbar";
 import { Button } from "@/components/ui/button";
 import { LineChart, Line, AreaChart, Area, ResponsiveContainer, XAxis, YAxis, Tooltip, CartesianGrid } from "recharts";
-import { Flame, ImageIcon, TrendingUp, TrendingDown, Minus, Plus, Camera, ArrowRight, Sparkles, Bell } from "lucide-react";
+import { Flame, ImageIcon, Plus, Camera, ArrowRight, Sparkles, Bell } from "lucide-react";
+import MetricDelta from "@/components/MetricDelta";
 
 const fetchProgress = async () => (await api.get("/progress")).data;
 const fetchTimeline = async () => (await api.get("/timeline")).data;
-
-const Trend = ({ value }) => {
-  if (value === null || value === undefined) return <span className="text-muted-foreground text-sm flex items-center gap-1"><Minus className="w-3.5 h-3.5" /> —</span>;
-  if (value > 0) return <span className="text-primary text-sm font-semibold flex items-center gap-1"><TrendingUp className="w-3.5 h-3.5" /> +{value}</span>;
-  if (value < 0) return <span className="text-destructive text-sm font-semibold flex items-center gap-1"><TrendingDown className="w-3.5 h-3.5" /> {value}</span>;
-  return <span className="text-muted-foreground text-sm flex items-center gap-1"><Minus className="w-3.5 h-3.5" /> No change</span>;
-};
 
 const Card = ({ children, className = "", delay = 0, ...rest }) => (
   <motion.div initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }} transition={{ delay }}
@@ -33,7 +27,6 @@ export default function Dashboard() {
 
   const points = progress?.points || [];
   const latest = progress?.latest;
-  const est = progress?.estimated_progress;
   const latestSession = timeline?.[timeline.length - 1];
   const latestImg = latestSession?.images?.[0];
 
@@ -104,7 +97,7 @@ export default function Dashboard() {
               <Card delay={0.1} data-testid="card-est-progress">
                 <div className="flex items-center gap-2 text-muted-foreground text-xs uppercase tracking-[0.15em] mb-3"><Sparkles className="w-4 h-4" /> Est. progress</div>
                 <p className="font-heading text-4xl font-bold">{latest?.overall ?? "—"}</p>
-                <div className="mt-1"><Trend value={est?.overall} /></div>
+                <MetricDelta current={latest?.overall} baseline={progress?.baseline?.overall} testId="delta-est-progress" />
               </Card>
               <Card delay={0.15} data-testid="card-confidence">
                 <div className="flex items-center gap-2 text-muted-foreground text-xs uppercase tracking-[0.15em] mb-3"><Plus className="w-4 h-4" /> Quality</div>

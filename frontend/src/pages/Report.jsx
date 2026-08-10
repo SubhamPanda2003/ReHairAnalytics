@@ -6,17 +6,11 @@ import { useAuth } from "@/context/AuthContext";
 import Navbar from "@/components/Navbar";
 import { Button } from "@/components/ui/button";
 import { LineChart, Line, ResponsiveContainer, XAxis, YAxis, Tooltip, CartesianGrid, Legend } from "recharts";
-import { Download, Activity, Loader2, TrendingUp, TrendingDown, Minus } from "lucide-react";
+import { Download, Activity, Loader2 } from "lucide-react";
+import MetricDelta from "@/components/MetricDelta";
 
 const fetchProgress = async () => (await api.get("/progress")).data;
 const fetchTimeline = async () => (await api.get("/timeline")).data;
-
-const Delta = ({ d }) => {
-  if (d === null || d === undefined) return <span className="text-muted-foreground">—</span>;
-  const Icon = d > 0 ? TrendingUp : d < 0 ? TrendingDown : Minus;
-  const cls = d > 0 ? "text-primary" : d < 0 ? "text-destructive" : "text-muted-foreground";
-  return <span className={`inline-flex items-center gap-1 font-semibold ${cls}`}><Icon className="w-4 h-4" />{d > 0 ? "+" : ""}{d}</span>;
-};
 
 export default function Report() {
   const navigate = useNavigate();
@@ -35,7 +29,7 @@ export default function Report() {
 
   const points = progress?.points || [];
   const latest = progress?.latest;
-  const est = progress?.estimated_progress;
+  const baseline = progress?.baseline;
   const a = detail?.analysis;
 
   return (
@@ -69,11 +63,16 @@ export default function Report() {
             <>
               {/* Latest metrics */}
               <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 mb-8">
-                {[["Density", latest?.density, est?.density], ["Coverage", latest?.coverage, est?.coverage], ["Hairline", latest?.hairline, est?.hairline], ["Overall", latest?.overall, est?.overall]].map(([label, val, d]) => (
+                {[
+                  ["Density", latest?.density, baseline?.density],
+                  ["Coverage", latest?.coverage, baseline?.coverage],
+                  ["Hairline", latest?.hairline, baseline?.hairline],
+                  ["Overall", latest?.overall, baseline?.overall],
+                ].map(([label, val, base]) => (
                   <div key={label} className="rounded-2xl border border-border p-4">
                     <p className="text-xs uppercase tracking-[0.15em] text-muted-foreground">{label}</p>
                     <p className="font-heading text-3xl font-bold">{val ?? "—"}</p>
-                    <p className="text-xs mt-1"><Delta d={d} /> <span className="text-muted-foreground">vs baseline</span></p>
+                    <MetricDelta current={val} baseline={base} testId={`report-delta-${label.toLowerCase()}`} />
                   </div>
                 ))}
               </div>

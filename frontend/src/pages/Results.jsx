@@ -5,6 +5,7 @@ import { motion } from "framer-motion";
 import { api, fileUrl } from "@/lib/api";
 import Navbar from "@/components/Navbar";
 import ScoreRing from "@/components/ScoreRing";
+import MetricDelta from "@/components/MetricDelta";
 import { Button } from "@/components/ui/button";
 import {
   AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription,
@@ -95,10 +96,22 @@ export default function Results() {
             <motion.div initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }}
               className="rounded-3xl border border-border bg-card p-6 md:p-8 mb-6">
               <div className="grid grid-cols-2 md:grid-cols-4 gap-6 justify-items-center">
-                <div className="flex flex-col items-center"><ScoreRing value={a.density_score} label="Density" color="hsl(var(--chart-1))" testId="ring-density" /></div>
-                <div className="flex flex-col items-center"><ScoreRing value={a.coverage_score} label="Coverage" color="hsl(var(--chart-2))" testId="ring-coverage" /></div>
-                <div className="flex flex-col items-center"><ScoreRing value={a.hairline_score} label="Hairline" color="hsl(var(--chart-3))" testId="ring-hairline" /></div>
-                <div className="flex flex-col items-center"><ScoreRing value={a.overall_score} label="Overall" color="hsl(var(--chart-4))" testId="ring-overall" /></div>
+                <div className="flex flex-col items-center">
+                  <ScoreRing value={a.density_score} label="Density" color="hsl(var(--chart-1))" testId="ring-density" />
+                  <MetricDelta current={a.density_score} baseline={s.baseline_analysis?.density_score} testId="delta-density" />
+                </div>
+                <div className="flex flex-col items-center">
+                  <ScoreRing value={a.coverage_score} label="Coverage" color="hsl(var(--chart-2))" testId="ring-coverage" />
+                  <MetricDelta current={a.coverage_score} baseline={s.baseline_analysis?.coverage_score} testId="delta-coverage" />
+                </div>
+                <div className="flex flex-col items-center">
+                  <ScoreRing value={a.hairline_score} label="Hairline" color="hsl(var(--chart-3))" testId="ring-hairline" />
+                  <MetricDelta current={a.hairline_score} baseline={s.baseline_analysis?.hairline_score} testId="delta-hairline" />
+                </div>
+                <div className="flex flex-col items-center">
+                  <ScoreRing value={a.overall_score} label="Overall" color="hsl(var(--chart-4))" testId="ring-overall" />
+                  <MetricDelta current={a.overall_score} baseline={s.baseline_analysis?.overall_score} testId="delta-overall" />
+                </div>
               </div>
               <div className="grid grid-cols-3 gap-4 mt-8 text-center">
                 <div><p className="text-xs uppercase tracking-[0.15em] text-muted-foreground">Image quality</p><p className="font-heading text-2xl font-bold">{a.quality_score}</p></div>
