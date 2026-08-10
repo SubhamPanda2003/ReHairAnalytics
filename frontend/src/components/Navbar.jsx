@@ -65,14 +65,14 @@ export default function Navbar() {
         </div>
       </div>
 
-      <nav className="md:hidden flex items-center gap-1 overflow-x-auto no-scrollbar border-t border-border px-2 py-1.5">
+      <nav className="md:hidden flex items-center border-t border-border">
         {links.map((l) => {
           const active = location.pathname === l.to;
           return (
             <button key={l.to} onClick={() => navigate(l.to)} data-testid={`${l.id}-mobile`}
-              className={`shrink-0 flex flex-col items-center gap-0.5 px-3 py-1 rounded-lg text-[11px] ${active ? "text-primary" : "text-muted-foreground"}`}>
-              <l.icon className="w-5 h-5" />
-              {l.label}
+              className={`flex-1 min-w-0 flex flex-col items-center gap-0.5 px-1 py-1.5 rounded-lg text-[10px] ${active ? "text-primary" : "text-muted-foreground"}`}>
+              <l.icon className="w-5 h-5 shrink-0" />
+              <span className="w-full truncate text-center">{l.label}</span>
             </button>
           );
         })}
