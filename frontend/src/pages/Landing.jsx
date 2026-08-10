@@ -195,8 +195,8 @@ export default function Landing() {
         <p className="text-muted-foreground mb-12">Start free. Placeholder plans below — no charges during the MVP.</p>
         <div className="grid md:grid-cols-3 gap-6">
           {[
-            { name: "Starter", price: "$0", tag: "Forever free", feats: ["Weekly tracking", "Baseline + 4 comparisons", "AI summaries"], primary: false },
-            { name: "Pro", price: "$9", tag: "Placeholder", feats: ["Unlimited scans", "All 5 views", "Full trend charts", "Data export"], primary: true },
+            { name: "Starter", price: "₹0", tag: "Forever free", feats: ["Weekly tracking", "Baseline + 4 comparisons", "AI summaries"], primary: false },
+            { name: "Pro", price: "₹299", tag: "Placeholder", feats: ["Unlimited scans", "All 5 views", "Full trend charts", "Data export"], primary: true },
             { name: "Clinic", price: "Custom", tag: "Coming soon", feats: ["Multi-patient", "Team dashboard", "Priority AI"], primary: false },
           ].map((p) => (
             <div key={p.name} className={`rounded-2xl p-7 border ${p.primary ? "border-primary bg-primary text-primary-foreground" : "border-border bg-card"}`}>
