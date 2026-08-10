@@ -14,6 +14,32 @@ const fetchTimeline = async () => (await api.get("/timeline")).data;
 
 const confidenceLabel = (c) => (c === null || c === undefined ? null : c >= 80 ? "High" : c >= 60 ? "Moderate" : "Low");
 
+// Auto-scan frames carry a `region` (front/left/right/crown/hairline/back); manual uploads
+// carry a `view` (front/top/left/right/back) instead. Either way, group by whichever is present.
+const REGION_ORDER = ["front", "left", "right", "crown", "hairline", "back", "top"];
+
+// Best photo per region/view for a day's session -- same ranking the backend uses for
+// baseline/current (highest confidence, then quality) -- capped at 6.
+const bestPerRegion = (images) => {
+  if (!images || images.length === 0) return [];
+  const best = {};
+  for (const img of images) {
+    const key = img.region || img.view || "photo";
+    const current = best[key];
+    const better = !current
+      || (img.confidence || 0) > (current.confidence || 0)
+      || ((img.confidence || 0) === (current.confidence || 0) && (img.quality_score || 0) > (current.quality_score || 0));
+    if (better) best[key] = img;
+  }
+  return Object.entries(best)
+    .sort(([a], [b]) => {
+      const ai = REGION_ORDER.indexOf(a), bi = REGION_ORDER.indexOf(b);
+      return (ai === -1 ? 99 : ai) - (bi === -1 ? 99 : bi);
+    })
+    .slice(0, 6)
+    .map(([, img]) => img);
+};
+
 export default function Report() {
   const navigate = useNavigate();
   const { user } = useAuth();
@@ -113,6 +139,43 @@ export default function Report() {
                       <Line type="monotone" dataKey="hairline" stroke="hsl(var(--chart-3))" strokeWidth={2.5} dot={{ r: 3 }} />
                     </LineChart>
                   </ResponsiveContainer>
+                </div>
+              )}
+
+              {/* Weekly photo timeline */}
+              {timeline && timeline.length > 0 && (
+                <div className="mb-8">
+                  <h3 className="font-heading font-semibold mb-1">Weekly photo timeline</h3>
+                  <p className="text-xs text-muted-foreground mb-4">Best photo per captured region each week (up to 6), alongside that week's measurements.</p>
+                  <div className="space-y-4">
+                    {timeline.map((s) => {
+                      const regionPhotos = bestPerRegion(s.images);
+                      return (
+                        <div key={s.id} className="rounded-2xl border border-border p-4" data-testid={`report-week-${s.week_number}`}>
+                          <div className="flex items-center justify-between mb-3">
+                            <p className="text-sm font-semibold">
+                              Week {s.week_number} <span className="text-muted-foreground font-normal">· {new Date(s.date).toLocaleDateString(undefined, { month: "short", day: "numeric" })}</span>
+                            </p>
+                            <p className="text-xs text-muted-foreground">{s.analysis ? <>Overall <b className="text-foreground">{s.analysis.overall_score}</b></> : "Not analyzed"}</p>
+                          </div>
+                          {regionPhotos.length === 0 ? (
+                            <p className="text-xs text-muted-foreground">No photos</p>
+                          ) : (
+                            <div className="grid grid-cols-3 sm:grid-cols-6 gap-2">
+                              {regionPhotos.map((img) => (
+                                <figure key={img.id}>
+                                  <div className="rounded-lg overflow-hidden border border-border aspect-square">
+                                    <img src={fileUrl(img.thumb_path)} alt={img.region || img.view} className="w-full h-full object-cover" />
+                                  </div>
+                                  <figcaption className="text-[10px] text-center text-muted-foreground mt-1 capitalize">{img.region || img.view}</figcaption>
+                                </figure>
+                              ))}
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
                 </div>
               )}
 
