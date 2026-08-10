@@ -33,7 +33,7 @@ export default function AutoScan() {
         </div>
 
         <div className="lg:col-span-3 rounded-3xl border border-border bg-card p-6 flex flex-col items-center justify-center">
-          <div className="relative rounded-3xl overflow-hidden bg-secondary flex items-center justify-center" style={{ width: 260, height: 260 }}>
+          <div className="relative rounded-3xl overflow-hidden bg-secondary flex items-center justify-center w-[min(65vw,260px)] aspect-square">
             <Silhouette />
             <div className="text-center relative">
               <Camera className="w-8 h-8 text-muted-foreground mx-auto mb-2" />
@@ -41,7 +41,7 @@ export default function AutoScan() {
             </div>
           </div>
           <p className="text-sm text-muted-foreground mt-4 text-center">Move for {params.duration}s while it captures — we keep the sharpest photo of each area.</p>
-          <div className="flex items-center gap-3 mt-4">
+          <div className="flex flex-wrap items-center justify-center gap-3 mt-4">
             <Button onClick={start} className="rounded-full h-12 px-8 text-base" data-testid="start-scan-btn">
               <Play className="w-5 h-5 mr-1.5" /> Start {params.duration}s scan
             </Button>
@@ -56,10 +56,10 @@ export default function AutoScan() {
       </div>
 
       {phase !== "idle" && (
-        <div className={`fixed inset-0 z-[60] flex flex-col items-center justify-center gap-6 px-6 transition-colors duration-300 ${screenLight ? "bg-white text-stone-700" : "bg-neutral-900 text-white"}`} data-testid="scan-overlay">
-          <div className="relative rounded-full overflow-hidden shadow-2xl" style={{ width: size, height: size, background: "#000" }}>
+        <div className={`fixed inset-0 z-[60] flex flex-col items-center justify-center gap-4 sm:gap-6 px-6 py-6 overflow-y-auto transition-colors duration-300 ${screenLight ? "bg-white text-stone-700" : "bg-neutral-900 text-white"}`} data-testid="scan-overlay">
+          <div className="relative rounded-full overflow-hidden shadow-2xl w-[min(70vw,300px)] aspect-square shrink-0" style={{ background: "#000" }}>
             <video ref={videoRef} autoPlay playsInline muted className="w-full h-full object-cover -scale-x-100" />
-            <svg className="absolute inset-0 -rotate-90" width={size} height={size}>
+            <svg viewBox={`0 0 ${size} ${size}`} className="absolute inset-0 w-full h-full -rotate-90">
               <circle cx={size / 2} cy={size / 2} r={r} fill="none" stroke="rgba(255,255,255,0.3)" strokeWidth={stroke} />
               <circle cx={size / 2} cy={size / 2} r={r} fill="none" stroke="hsl(var(--primary))" strokeWidth={stroke}
                 strokeDasharray={circ} strokeDashoffset={circ - (progress / 100) * circ} strokeLinecap="round" style={{ transition: "stroke-dashoffset 0.2s linear" }} />
@@ -69,9 +69,9 @@ export default function AutoScan() {
 
           {phase === "scanning" ? (
             <>
-              <p className="text-2xl font-heading font-bold text-center max-w-md" data-testid="scan-guide">{guide}</p>
+              <p className="text-xl sm:text-2xl font-heading font-bold text-center max-w-md" data-testid="scan-guide">{guide}</p>
               <p className="text-sm font-medium">{count} photos · {Math.round(progress)}%</p>
-              <div className="flex items-center gap-3">
+              <div className="flex flex-wrap items-center justify-center gap-3">
                 <Button variant="outline" onClick={() => setScreenLight((v) => !v)} className={`rounded-full h-11 ${screenLight ? "" : "bg-white/10 border-white/30 text-white hover:bg-white/20"}`} data-testid="light-toggle">
                   {screenLight ? <Sun className="w-4 h-4 mr-1.5" /> : <SunDim className="w-4 h-4 mr-1.5" />} Light {screenLight ? "on" : "off"}
                 </Button>
