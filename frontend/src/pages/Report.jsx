@@ -12,6 +12,8 @@ import MetricDelta from "@/components/MetricDelta";
 const fetchProgress = async () => (await api.get("/progress")).data;
 const fetchTimeline = async () => (await api.get("/timeline")).data;
 
+const confidenceLabel = (c) => (c === null || c === undefined ? null : c >= 80 ? "High" : c >= 60 ? "Moderate" : "Low");
+
 export default function Report() {
   const navigate = useNavigate();
   const { user } = useAuth();
@@ -76,6 +78,16 @@ export default function Report() {
                   </div>
                 ))}
               </div>
+
+              {/* Measurement quality */}
+              {a && (
+                <div className="rounded-2xl border border-border p-4 mb-8 flex flex-wrap items-center gap-x-6 gap-y-1.5 text-xs" data-testid="report-measurement-quality">
+                  <span className="text-muted-foreground uppercase tracking-[0.1em] font-semibold">Measurement quality</span>
+                  <span>Confidence <b className="text-foreground">{a.confidence}%</b>{confidenceLabel(a.confidence) && <span className="text-muted-foreground"> ({confidenceLabel(a.confidence)})</span>}</span>
+                  <span>Photo quality <b className="text-foreground">{a.quality_score}</b></span>
+                  <span>Visible scalp <b className="text-foreground">{a.visible_scalp_pct}%</b></span>
+                </div>
+              )}
 
               {/* Side by side */}
               {detail?.baseline_best_image && detail?.current_best_image && (

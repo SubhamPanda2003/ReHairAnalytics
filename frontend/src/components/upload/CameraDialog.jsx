@@ -45,7 +45,7 @@ export default function CameraDialog({ open, onClose, onCapture }) {
       <DialogContent className="max-w-md rounded-3xl" data-testid="camera-dialog">
         <DialogHeader><DialogTitle className="font-heading">Align & capture</DialogTitle></DialogHeader>
         <div className="relative rounded-2xl overflow-hidden bg-black aspect-square">
-          <video ref={videoRef} autoPlay playsInline muted className="w-full h-full object-cover" />
+          <video ref={videoRef} autoPlay playsInline muted className="w-full h-full object-cover -scale-x-100" />
           <Silhouette />
           <div className="absolute top-3 left-0 right-0 flex justify-center">
             <span className="glass text-xs px-3 py-1.5 rounded-full">Line up eyes & ears · hold steady</span>
