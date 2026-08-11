@@ -15,6 +15,11 @@ METRIC_KEYS = [
 DELTA_KEYS = ("density", "coverage", "hairline", "overall")
 BLUR_QUALITY_MIN = 40
 
+# Auto-scan frames carry a `region` (front/left/right/crown/hairline/back); manual
+# uploads carry a `view` (front/top/left/right/back) instead -- present order for
+# whichever tag is available.
+REGION_ORDER = ["front", "left", "right", "crown", "hairline", "back", "top"]
+
 
 def today_str() -> str:
     return datetime.now(timezone.utc).strftime("%Y-%m-%d")
@@ -46,6 +51,23 @@ async def best_image_path(session_id: str) -> Optional[str]:
         return None
     imgs.sort(key=lambda i: (i.get("confidence", 0), i.get("quality_score", 0)), reverse=True)
     return imgs[0].get("storage_path")
+
+
+def best_per_region(images: list[dict]) -> dict:
+    """Best photo (highest confidence, then quality) per region/view tag."""
+    best: dict[str, dict] = {}
+    for img in images:
+        key = img.get("region") or img.get("view") or "photo"
+        current = best.get(key)
+        rank = (img.get("confidence", 0), img.get("quality_score", 0))
+        if not current or rank > (current.get("confidence", 0), current.get("quality_score", 0)):
+            best[key] = img
+    return best
+
+
+async def get_baseline_session_id(user_id: str) -> Optional[str]:
+    first = await db.tracking_sessions.find({"user_id": user_id}, {"_id": 0, "id": 1}).sort("week_number", 1).to_list(1)
+    return first[0]["id"] if first else None
 
 
 async def attach_children(sessions: list[dict]) -> list[dict]:

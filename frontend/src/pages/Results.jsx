@@ -6,6 +6,7 @@ import { api, fileUrl } from "@/lib/api";
 import Navbar from "@/components/Navbar";
 import ScoreRing from "@/components/ScoreRing";
 import MetricDelta from "@/components/MetricDelta";
+import ChangeMaps from "@/components/ChangeMaps";
 import { Button } from "@/components/ui/button";
 import {
   AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription,
@@ -169,6 +170,9 @@ export default function Results() {
                 </div>
               </motion.div>
             )}
+
+            {/* Visual change map */}
+            <ChangeMaps sessionId={sessionId} testId="change-maps" />
 
             {/* Comparisons */}
             <div className="grid md:grid-cols-2 gap-6 mb-6">

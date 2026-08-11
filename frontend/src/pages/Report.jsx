@@ -8,6 +8,7 @@ import { Button } from "@/components/ui/button";
 import { LineChart, Line, ResponsiveContainer, XAxis, YAxis, Tooltip, CartesianGrid, Legend } from "recharts";
 import { Download, Activity, Loader2 } from "lucide-react";
 import MetricDelta from "@/components/MetricDelta";
+import ChangeMaps from "@/components/ChangeMaps";
 
 const fetchProgress = async () => (await api.get("/progress")).data;
 const fetchTimeline = async () => (await api.get("/timeline")).data;
@@ -122,6 +123,9 @@ export default function Report() {
                   <figure><div className="rounded-2xl overflow-hidden border border-primary/40"><img src={fileUrl(detail.current_best_image)} alt="current" className="w-full aspect-square object-cover" /></div><figcaption className="text-center text-xs text-primary mt-2 uppercase tracking-[0.15em]">Latest</figcaption></figure>
                 </div>
               )}
+
+              {/* Visual change map */}
+              <ChangeMaps sessionId={latestSession?.id} testId="report-change-maps" />
 
               {/* Trend */}
               {points.length > 1 && (

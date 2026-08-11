@@ -41,6 +41,49 @@ async def get_session(session_id: str, user: CurrentUser):
     return s
 
 
+@router.get("/sessions/{session_id}/change-maps")
+async def get_change_maps(session_id: str, user: CurrentUser):
+    """Pixel-aligns this session's photos against the baseline's, per matching
+    region (front/left/right/crown/hairline/back), then returns a heatmap per
+    region of where they visibly differ. Comparing same-region pairs avoids the
+    nonsensical case of aligning e.g. a front photo against a crown photo. This
+    is a visual change map, not a density/hair-count measurement."""
+    s = await db.tracking_sessions.find_one({"id": session_id, "user_id": user["user_id"]}, {"_id": 0})
+    if not s:
+        raise HTTPException(status_code=404, detail="Session not found")
+
+    baseline_id = await sessions_service.get_baseline_session_id(user["user_id"])
+    if not baseline_id or baseline_id == session_id:
+        raise HTTPException(status_code=400, detail="Need at least two scans (baseline + this one) to generate change maps")
+
+    current_images = await db.images.find({"tracking_session_id": session_id}, {"_id": 0}).to_list(200)
+    baseline_images = await db.images.find({"tracking_session_id": baseline_id}, {"_id": 0}).to_list(200)
+    current_by_region = sessions_service.best_per_region(current_images)
+    baseline_by_region = sessions_service.best_per_region(baseline_images)
+
+    shared_regions = [r for r in sessions_service.REGION_ORDER if r in current_by_region and r in baseline_by_region]
+    for r in current_by_region:
+        if r in baseline_by_region and r not in shared_regions:
+            shared_regions.append(r)
+    if not shared_regions:
+        raise HTTPException(status_code=400, detail="No matching regions between baseline and this scan to compare")
+
+    results = []
+    for region in shared_regions:
+        baseline_bytes, _ = await asyncio.to_thread(store.get_object, baseline_by_region[region]["storage_path"])
+        current_bytes, _ = await asyncio.to_thread(store.get_object, current_by_region[region]["storage_path"])
+        heatmap_bytes, aligned = await asyncio.to_thread(image_utils.align_and_diff, baseline_bytes, current_bytes)
+        if heatmap_bytes is None:
+            continue
+        heatmap_path = f"{store.APP_NAME}/changemaps/{user['user_id']}/{session_id}-{region}.jpg"
+        await asyncio.to_thread(store.put_object, heatmap_path, heatmap_bytes, "image/jpeg")
+        results.append({"region": region, "heatmap_path": heatmap_path, "aligned": aligned})
+
+    if not results:
+        raise HTTPException(status_code=422, detail="Could not process these photos for comparison")
+    return {"maps": results}
+
+
 @router.post("/scan")
 async def auto_scan(
     user: CurrentUser,
