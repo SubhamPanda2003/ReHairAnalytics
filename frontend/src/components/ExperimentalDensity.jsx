@@ -40,7 +40,7 @@ export default function ExperimentalDensity({ sessionId, testId = "experimental-
       {open && (
         <div className="mt-4">
           <p className="text-xs text-muted-foreground mb-4">
-            Not a clinical measurement. This uses real OpenCV computation (face-based photo calibration + pixel color
+            Not a clinical measurement. This uses a real CV model (face-based photo calibration + pixel color
             analysis), not an AI guess — but converting that into hairs/cm² relies on an unvalidated modeling
             assumption, since there's no reference object or dermatoscope involved. Treat the range below as the
             honest uncertainty, not the fine print.
