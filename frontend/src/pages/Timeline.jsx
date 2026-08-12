@@ -1,21 +1,42 @@
-import React from "react";
+import React, { useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient, useMutation } from "@tanstack/react-query";
 import { motion } from "framer-motion";
 import { api, fileUrl } from "@/lib/api";
 import Navbar from "@/components/Navbar";
 import { Button } from "@/components/ui/button";
+import {
+  AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription,
+  AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
+import { toast } from "sonner";
 import { LineChart, Line, ResponsiveContainer, XAxis, YAxis, Tooltip, CartesianGrid, Legend } from "recharts";
-import { Camera, ChevronRight, Loader2, ImageOff } from "lucide-react";
+import { Camera, ChevronRight, Loader2, ImageOff, Trash2 } from "lucide-react";
 
 const fetchTimeline = async () => (await api.get("/timeline")).data;
 const fetchProgress = async () => (await api.get("/progress")).data;
 
 export default function Timeline() {
   const navigate = useNavigate();
+  const qc = useQueryClient();
   const { data: timeline, isLoading } = useQuery({ queryKey: ["timeline"], queryFn: fetchTimeline });
   const { data: progress } = useQuery({ queryKey: ["progress"], queryFn: fetchProgress });
   const points = progress?.points || [];
+  const [toDelete, setToDelete] = useState(null);
+
+  const deleteSession = useMutation({
+    mutationFn: (id) => api.delete(`/sessions/${id}`),
+    onSuccess: () => {
+      toast.success("Scan deleted");
+      qc.invalidateQueries({ queryKey: ["timeline"] });
+      qc.invalidateQueries({ queryKey: ["progress"] });
+    },
+    onError: (e) => toast.error(e.response?.data?.detail || "Could not delete this scan"),
+  });
+
+  // timeline is sorted oldest-first by the backend -- same order it uses to pick baseline.
+  const isBaseline = !!toDelete && timeline?.[0]?.id === toDelete.id;
+  const nextBaseline = isBaseline ? timeline?.[1] : null;
 
   return (
     <div className="min-h-screen bg-background" data-testid="timeline-page">
@@ -60,31 +81,70 @@ export default function Timeline() {
             <div className="relative pl-8">
               <div className="absolute left-3 top-2 bottom-2 w-px bg-border" />
               {[...timeline].reverse().map((s, i) => (
-                <motion.button key={s.id} initial={{ opacity: 0, x: -12 }} animate={{ opacity: 1, x: 0 }} transition={{ delay: i * 0.04 }}
-                  onClick={() => navigate(`/results/${s.id}`)} data-testid={`timeline-milestone-${s.week_number}`}
-                  className="relative w-full text-left mb-4 group">
+                <motion.div key={s.id} initial={{ opacity: 0, x: -12 }} animate={{ opacity: 1, x: 0 }} transition={{ delay: i * 0.04 }}
+                  className="relative mb-4 group">
                   <span className="absolute -left-[22px] top-6 w-3 h-3 rounded-full bg-primary ring-4 ring-background" />
                   <div className="rounded-2xl border border-border bg-card p-4 flex items-center gap-4 hover:-translate-y-0.5 transition-transform duration-200">
-                    {s.images?.[0] ? <img src={fileUrl(s.images[0].thumb_path)} alt="" className="w-16 h-16 rounded-xl object-cover" /> : <div className="w-16 h-16 rounded-xl bg-muted flex items-center justify-center"><ImageOff className="w-5 h-5 text-muted-foreground" /></div>}
-                    <div className="flex-1 min-w-0">
-                      <p className="font-heading font-semibold">{new Date(s.date).toLocaleDateString(undefined, { weekday: "short", month: "short", day: "numeric" })}</p>
-                      <p className="text-xs text-muted-foreground">{s.region && s.region !== "full" ? `${s.region} focus · ` : ""}{s.images?.length || 0} photos</p>
-                      {s.analysis ? (
-                        <div className="flex gap-3 mt-1.5 text-xs">
-                          <span>Density <b>{s.analysis.density_score}</b></span>
-                          <span>Coverage <b>{s.analysis.coverage_score}</b></span>
-                          <span>Overall <b>{s.analysis.overall_score}</b></span>
-                        </div>
-                      ) : <p className="text-xs text-muted-foreground mt-1.5">Not analyzed</p>}
-                    </div>
-                    <ChevronRight className="w-5 h-5 text-muted-foreground group-hover:text-foreground transition-colors" />
+                    <button onClick={() => navigate(`/results/${s.id}`)} data-testid={`timeline-milestone-${s.week_number}`}
+                      className="flex items-center gap-4 flex-1 min-w-0 text-left">
+                      {s.images?.[0] ? <img src={fileUrl(s.images[0].thumb_path)} alt="" className="w-16 h-16 rounded-xl object-cover" /> : <div className="w-16 h-16 rounded-xl bg-muted flex items-center justify-center"><ImageOff className="w-5 h-5 text-muted-foreground" /></div>}
+                      <div className="flex-1 min-w-0">
+                        <p className="font-heading font-semibold">{new Date(s.date).toLocaleDateString(undefined, { weekday: "short", month: "short", day: "numeric" })}</p>
+                        <p className="text-xs text-muted-foreground">{s.region && s.region !== "full" ? `${s.region} focus · ` : ""}{s.images?.length || 0} photos</p>
+                        {s.analysis ? (
+                          <div className="flex gap-3 mt-1.5 text-xs">
+                            <span>Density <b>{s.analysis.density_score}</b></span>
+                            <span>Coverage <b>{s.analysis.coverage_score}</b></span>
+                            <span>Overall <b>{s.analysis.overall_score}</b></span>
+                          </div>
+                        ) : <p className="text-xs text-muted-foreground mt-1.5">Not analyzed</p>}
+                      </div>
+                    </button>
+                    <button onClick={() => navigate(`/results/${s.id}`)} aria-label="Open scan" className="shrink-0">
+                      <ChevronRight className="w-5 h-5 text-muted-foreground group-hover:text-foreground transition-colors" />
+                    </button>
+                    <button
+                      onClick={() => setToDelete(s)}
+                      className="shrink-0 w-8 h-8 rounded-full flex items-center justify-center text-muted-foreground hover:bg-destructive hover:text-destructive-foreground transition-colors duration-200"
+                      aria-label={`Delete scan from ${new Date(s.date).toLocaleDateString()}`}
+                      data-testid={`delete-week-${s.week_number}`}
+                    >
+                      <Trash2 className="w-4 h-4" />
+                    </button>
                   </div>
-                </motion.button>
+                </motion.div>
               ))}
             </div>
           </>
         )}
       </main>
+
+      <AlertDialog open={!!toDelete} onOpenChange={(o) => !o && setToDelete(null)}>
+        <AlertDialogContent className="rounded-3xl">
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete this scan?</AlertDialogTitle>
+            <AlertDialogDescription>
+              This permanently removes this scan and all its photos. This cannot be undone.
+              {isBaseline && nextBaseline && (
+                <> This is currently your baseline — after deleting it, your {new Date(nextBaseline.date).toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" })} scan becomes the new baseline.</>
+              )}
+              {isBaseline && !nextBaseline && (
+                <> This is your only scan — deleting it clears your history.</>
+              )}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel className="rounded-full" data-testid="delete-week-cancel">Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={() => { deleteSession.mutate(toDelete.id); setToDelete(null); }}
+              className="rounded-full bg-destructive text-destructive-foreground hover:bg-destructive/90"
+              data-testid="delete-week-confirm"
+            >
+              Delete
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }

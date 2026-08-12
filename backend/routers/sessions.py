@@ -207,6 +207,20 @@ async def delete_image(image_id: str, user: CurrentUser):
     return {"deleted": True, "id": image_id}
 
 
+@router.delete("/sessions/{session_id}")
+async def delete_session(session_id: str, user: CurrentUser):
+    """Delete a whole scan (all its photos + analysis). Baseline isn't stored
+    anywhere -- it's always recomputed as the earliest remaining session -- so
+    deleting the current baseline automatically promotes the next-oldest one."""
+    s = await db.tracking_sessions.find_one({"id": session_id, "user_id": user["user_id"]}, {"_id": 0})
+    if not s:
+        raise HTTPException(status_code=404, detail="Session not found")
+    await db.tracking_sessions.delete_one({"id": session_id, "user_id": user["user_id"]})
+    await db.images.delete_many({"tracking_session_id": session_id, "user_id": user["user_id"]})
+    await db.analysis.delete_many({"tracking_session_id": session_id, "user_id": user["user_id"]})
+    return {"deleted": True, "id": session_id}
+
+
 @router.post("/sessions/{session_id}/analyze")
 async def analyze_session(session_id: str, user: CurrentUser):
     s = await db.tracking_sessions.find_one({"id": session_id, "user_id": user["user_id"]}, {"_id": 0})
