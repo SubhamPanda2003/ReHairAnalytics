@@ -30,7 +30,7 @@ async def progress(user: CurrentUser):
                 "date": s["date"],
                 "density": a["density_score"],
                 "coverage": a["coverage_score"],
-                "hairline": a["hairline_score"],
+                "hairline": a.get("hairline_score"),
                 "quality": a.get("quality_score", 0),
                 "overall": a["overall_score"],
             })
@@ -39,11 +39,14 @@ async def progress(user: CurrentUser):
     streak = len(sessions)
     est_progress = None
     if latest and baseline and latest != baseline:
+        def _delta(key):
+            l, b = latest.get(key), baseline.get(key)
+            return round(l - b, 1) if l is not None and b is not None else None
         est_progress = {
-            "density": round(latest["density"] - baseline["density"], 1),
-            "coverage": round(latest["coverage"] - baseline["coverage"], 1),
-            "hairline": round(latest["hairline"] - baseline["hairline"], 1),
-            "overall": round(latest["overall"] - baseline["overall"], 1),
+            "density": _delta("density"),
+            "coverage": _delta("coverage"),
+            "hairline": _delta("hairline"),
+            "overall": _delta("overall"),
         }
     last_date = sessions[-1]["date"] if sessions else None
     days_since = None

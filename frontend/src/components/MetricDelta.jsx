@@ -1,9 +1,9 @@
 import { Minus, TrendingDown, TrendingUp } from "lucide-react";
 
 /** Standard "baseline -> current -> change" line used under every score in the app. */
-export default function MetricDelta({ current, baseline, testId }) {
+export default function MetricDelta({ current, baseline, testId, emptyLabel = "This is your baseline" }) {
   if (baseline === null || baseline === undefined || current === null || current === undefined) {
-    return <p className="text-[11px] text-muted-foreground mt-1.5" data-testid={testId}>This is your baseline</p>;
+    return <p className="text-[11px] text-muted-foreground mt-1.5" data-testid={testId}>{emptyLabel}</p>;
   }
   const delta = Math.round((current - baseline) * 10) / 10;
   const Icon = delta > 0 ? TrendingUp : delta < 0 ? TrendingDown : Minus;

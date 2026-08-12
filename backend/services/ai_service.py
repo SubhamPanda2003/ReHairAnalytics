@@ -80,25 +80,37 @@ REGION_FOCUS = {
     "hairline": "Focus specifically on the FRONTAL HAIRLINE and temples — the boundary position, peak, and any temple recession.",
 }
 
+# The frontal hairline isn't visible from the crown, the back of the head, or a
+# straight-down top shot -- asking the model to score it there just produces a
+# guess with no anatomical basis, and that guess was previously getting averaged
+# into the headline hairline score. Only request/report hairline_score for views
+# where it's actually in frame.
+HAIRLINE_VISIBLE_REGIONS = {"full", "front", "hairline", "left", "right"}
+
 
 async def analyze_metrics(image_b64: str, view: str, session_id: str, region: str = "full") -> dict:
+    include_hairline = region in HAIRLINE_VISIBLE_REGIONS
     system = (
         "You are an objective hair measurement assistant for standardized tracking photos. "
         "You NEVER diagnose disease or give medical advice. You estimate visible photographic metrics only. "
         "Respond ONLY with strict JSON."
     )
     focus = REGION_FOCUS.get(region, REGION_FOCUS["full"])
+    metrics_list = (
+        "hairline_score (higher = stronger/more forward, less recession), " if include_hairline else ""
+    ) + "density_score (higher = denser visible hair), coverage_score (higher = more scalp covered by hair, less visible scalp), "
+    schema = ("\"hairline_score\":int," if include_hairline else "") + (
+        "\"density_score\":int,\"coverage_score\":int,"
+        "\"overall_score\":int,\"confidence\":int,\"quality\":int,\"visible_scalp_pct\":int,\"hair_coverage_pct\":int"
+    )
     prompt = (
         f"Analyze this hair/scalp photo (view='{view}', focus region='{region}'). {focus} "
-        "Estimate objective visible metrics on a 0-100 scale: "
-        "hairline_score (higher = stronger/more forward, less recession), "
-        "density_score (higher = denser visible hair), "
-        "coverage_score (higher = more scalp covered by hair, less visible scalp), "
+        f"Estimate objective visible metrics on a 0-100 scale: {metrics_list}"
         "overall_score (weighted blend). Give confidence (0-100) — how reliably this exact frame shows the "
         "focus region (low if blurry, off-angle, too far, or the region is not clearly visible). Also give "
         "quality (0-100) for photographic usability. "
-        "Return strict JSON: {\"hairline_score\":int,\"density_score\":int,\"coverage_score\":int,"
-        "\"overall_score\":int,\"confidence\":int,\"quality\":int,\"visible_scalp_pct\":int,\"hair_coverage_pct\":int}."
+        + ("" if include_hairline else "This view does not show the frontal hairline -- do not estimate hairline_score. ")
+        + f"Return strict JSON: {{{schema}}}."
     )
     try:
         chat = _new_chat(session_id, system)
@@ -107,8 +119,9 @@ async def analyze_metrics(image_b64: str, view: str, session_id: str, region: st
         data = _extract_json(resp)
         density = _clamp(data.get("density_score"), default=65)
         coverage = _clamp(data.get("coverage_score"), default=68)
-        hairline = _clamp(data.get("hairline_score"), default=70)
-        overall = _clamp(data.get("overall_score"), default=int((density + coverage + hairline) / 3))
+        hairline = _clamp(data.get("hairline_score"), default=70) if include_hairline else None
+        blend = [density, coverage] + ([hairline] if include_hairline else [])
+        overall = _clamp(data.get("overall_score"), default=int(sum(blend) / len(blend)))
         return {
             "hairline_score": hairline,
             "density_score": density,
@@ -122,7 +135,7 @@ async def analyze_metrics(image_b64: str, view: str, session_id: str, region: st
     except Exception as e:
         logger.error(f"analyze_metrics failed: {e}")
         return {
-            "hairline_score": 70, "density_score": 65, "coverage_score": 68,
+            "hairline_score": 70 if include_hairline else None, "density_score": 65, "coverage_score": 68,
             "overall_score": 68, "confidence": 75, "quality": 72, "visible_scalp_pct": 32, "hair_coverage_pct": 68,
         }
 
@@ -135,15 +148,18 @@ async def generate_summary(current: dict, previous: dict, baseline: dict, sessio
     )
 
     def diff(a, b, key):
-        if not b:
+        av, bv = a.get(key), b.get(key)
+        if not b or av is None or bv is None:
             return "n/a"
-        d = a.get(key, 0) - b.get(key, 0)
+        d = av - bv
         return f"{'+' if d >= 0 else ''}{d}"
 
+    hairline_current = current.get("hairline_score")
+    hairline_current = "n/a" if hairline_current is None else hairline_current
     prompt = (
         "Structured metrics (0-100 scale).\n"
         f"Current: density={current.get('density_score')}, coverage={current.get('coverage_score')}, "
-        f"hairline={current.get('hairline_score')}, quality/confidence={current.get('confidence')}.\n"
+        f"hairline={hairline_current}, quality/confidence={current.get('confidence')}.\n"
         f"Change vs previous: density={diff(current, previous, 'density_score')}, "
         f"coverage={diff(current, previous, 'coverage_score')}, hairline={diff(current, previous, 'hairline_score')}.\n"
         f"Change vs baseline: density={diff(current, baseline, 'density_score')}, "

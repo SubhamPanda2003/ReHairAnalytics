@@ -18,8 +18,12 @@ from pymongo import MongoClient
 BASE_URL = os.environ["REACT_APP_BACKEND_URL"].rstrip("/")
 API = f"{BASE_URL}/api"
 FIX = Path("/app/backend/tests/fixtures")
-METRIC_KEYS = ["hairline_score", "density_score", "coverage_score", "overall_score",
+# hairline_score is intentionally excluded here: a frontal hairline isn't visible
+# from the crown or the back of the head, so it's only present for regions where
+# it actually is (see ai_service.HAIRLINE_VISIBLE_REGIONS) -- checked separately below.
+METRIC_KEYS = ["density_score", "coverage_score", "overall_score",
                "confidence", "quality_score", "visible_scalp_pct", "hair_coverage_pct"]
+HAIRLINE_VISIBLE_REGIONS = {"full", "front", "hairline", "left", "right"}
 
 
 def _db():
@@ -93,13 +97,24 @@ class TestFullRegionScan:
             for k in METRIC_KEYS:
                 assert k in m, f"{reg} missing {k}"
                 assert isinstance(m[k], int) and 0 <= m[k] <= 100, (reg, k, m[k])
+            # hairline is only meaningful (and only present) for regions where the
+            # frontal hairline is actually in frame -- crown/back get no reading.
+            if reg in HAIRLINE_VISIBLE_REGIONS:
+                assert "hairline_score" in m and isinstance(m["hairline_score"], int) and 0 <= m["hairline_score"] <= 100, (reg, m)
+            else:
+                assert "hairline_score" not in m, f"{reg} should not have a hairline_score: {m}"
 
     def test_overall_blend_within_region_range(self, scan_result):
         a = scan_result["analysis"]
         pr = a["per_region"]
-        for k in ("density_score", "coverage_score", "hairline_score", "overall_score"):
+        for k in ("density_score", "coverage_score", "overall_score"):
             vals = [m[k] for m in pr.values()]
             assert min(vals) - 1 <= a[k] <= max(vals) + 1, (k, a[k], vals)
+        # overall hairline_score should only ever be blended from the hairline-visible
+        # regions actually captured (front/left/right/hairline here), never crown/back.
+        hairline_vals = [m["hairline_score"] for reg, m in pr.items() if reg in HAIRLINE_VISIBLE_REGIONS]
+        if hairline_vals:
+            assert min(hairline_vals) - 1 <= a["hairline_score"] <= max(hairline_vals) + 1, (a["hairline_score"], hairline_vals)
 
     def test_one_best_frame_stored_per_region(self, ctx, scan_result):
         sid = scan_result["session_id"]
@@ -154,6 +169,9 @@ class TestSingleRegionScan:
         m = a["per_region"]["crown"]
         for k in METRIC_KEYS:
             assert 0 <= m[k] <= 100, (k, m[k])
+        # crown has no frontal hairline in frame -- no hairline reading anywhere for this scan.
+        assert "hairline_score" not in m, m
+        assert a.get("hairline_score") is None, a["hairline_score"]
         assert a["frames_analyzed"] == n
         assert 1 <= a["frames_used"] <= n
         # overall metrics equal the single-region averages

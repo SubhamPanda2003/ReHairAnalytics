@@ -18,7 +18,7 @@ import { ArrowLeft, Sparkles, TrendingUp, TrendingDown, Minus, Loader2, FileText
 const fetchSession = async (id) => (await api.get(`/sessions/${id}`)).data;
 
 const Delta = ({ label, cur, ref }) => {
-  if (ref === null || ref === undefined) return null;
+  if (cur === null || cur === undefined || ref === null || ref === undefined) return null;
   const d = Math.round((cur - ref) * 10) / 10;
   const Icon = d > 0 ? TrendingUp : d < 0 ? TrendingDown : Minus;
   const cls = d > 0 ? "text-primary" : d < 0 ? "text-destructive" : "text-muted-foreground";
@@ -107,7 +107,10 @@ export default function Results() {
                 </div>
                 <div className="flex flex-col items-center">
                   <ScoreRing value={a.hairline_score} label="Hairline" color="hsl(var(--chart-3))" testId="ring-hairline" />
-                  <MetricDelta current={a.hairline_score} baseline={s.baseline_analysis?.hairline_score} testId="delta-hairline" />
+                  <MetricDelta
+                    current={a.hairline_score} baseline={s.baseline_analysis?.hairline_score} testId="delta-hairline"
+                    emptyLabel={a.hairline_score == null ? "No hairline reading this scan" : "This is your baseline"}
+                  />
                 </div>
                 <div className="flex flex-col items-center">
                   <ScoreRing value={a.overall_score} label="Overall" color="hsl(var(--chart-4))" testId="ring-overall" />
@@ -134,7 +137,11 @@ export default function Results() {
                       <div className="text-xs text-muted-foreground mt-2 space-y-1.5">
                         <div className="flex justify-between">Density <b className="text-foreground">{m.density_score}</b></div>
                         <div className="flex justify-between">Coverage <b className="text-foreground">{m.coverage_score}</b></div>
-                        <div className="flex justify-between">Hairline <b className="text-foreground">{m.hairline_score}</b></div>
+                        {m.hairline_score !== undefined ? (
+                          <div className="flex justify-between">Hairline <b className="text-foreground">{m.hairline_score}</b></div>
+                        ) : (
+                          <p className="italic text-muted-foreground/70">No hairline reading — not visible from this angle</p>
+                        )}
                       </div>
                     </div>
                   ))}

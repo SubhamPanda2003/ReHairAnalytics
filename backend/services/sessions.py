@@ -8,12 +8,23 @@ from fastapi import HTTPException
 from . import ai_service
 from models.database import db
 
+
+# hairline_score is handled separately from the other metrics: it's only ever
+# populated for frames from a region where a frontal hairline is actually visible
+# (see ai_service.HAIRLINE_VISIBLE_REGIONS), so it can't be blindly averaged
+# alongside metrics every frame has.
 METRIC_KEYS = [
-    "hairline_score", "density_score", "coverage_score", "overall_score",
+    "density_score", "coverage_score", "overall_score",
     "confidence", "quality_score", "visible_scalp_pct", "hair_coverage_pct",
 ]
 DELTA_KEYS = ("density", "coverage", "hairline", "overall")
 BLUR_QUALITY_MIN = 40
+
+
+def _avg_hairline(frames: list[dict]):
+    """Average hairline_score across only the frames that have one; None if none do."""
+    vals = [f["hairline_score"] for f in frames if f.get("hairline_score") is not None]
+    return int(round(sum(vals) / len(vals))) if vals else None
 
 # Auto-scan frames carry a `region` (front/left/right/crown/hairline/back); manual
 # uploads carry a `view` (front/top/left/right/back) instead -- present order for
@@ -126,11 +137,16 @@ async def get_baseline_and_previous(user_id: str, session_id: str):
 def compute_deltas(current: dict, reference: Optional[dict]) -> Optional[dict]:
     if not reference:
         return None
+
+    def d(key: str):
+        c, r = current.get(key), reference.get(key)
+        return round(c - r, 1) if c is not None and r is not None else None
+
     return {
-        "density": round(current["density_score"] - reference["density_score"], 1),
-        "coverage": round(current["coverage_score"] - reference["coverage_score"], 1),
-        "hairline": round(current["hairline_score"] - reference["hairline_score"], 1),
-        "overall": round(current["overall_score"] - reference["overall_score"], 1),
+        "density": d("density_score"),
+        "coverage": d("coverage_score"),
+        "hairline": d("hairline_score"),
+        "overall": d("overall_score"),
     }
 
 
@@ -155,20 +171,27 @@ async def finalize_day_analysis(user: dict, session_id: str, region: str) -> dic
         only = sorted(only, key=lambda x: x.get("confidence", 0), reverse=True)
         topn = only[: min(4, len(only))]
         reg_key = list(by_region.keys())[0] if by_region else region
-        per_region[reg_key] = {k: int(round(sum(f.get(k, 0) for f in topn) / len(topn))) for k in METRIC_KEYS}
+        reg_metrics = {k: int(round(sum(f.get(k, 0) for f in topn) / len(topn))) for k in METRIC_KEYS}
+        hairline = _avg_hairline(topn)
+        if hairline is not None:
+            reg_metrics["hairline_score"] = hairline
+        per_region[reg_key] = reg_metrics
     else:
         # Full scan: pick the single best-confidence frame per region, then blend those.
         topn = []
         for reg, fl in by_region.items():
             best = max(fl, key=lambda x: x.get("confidence", 0))
             topn.append(best)
-            per_region[reg] = {k: best.get(k, 0) for k in METRIC_KEYS}
+            reg_metrics = {k: best.get(k, 0) for k in METRIC_KEYS}
+            if best.get("hairline_score") is not None:
+                reg_metrics["hairline_score"] = best["hairline_score"]
+            per_region[reg] = reg_metrics
 
     def avg(key: str) -> int:
         return int(round(sum(f.get(key, 0) for f in topn) / len(topn)))
 
     metrics = {
-        "hairline_score": avg("hairline_score"),
+        "hairline_score": _avg_hairline(topn),
         "density_score": avg("density_score"),
         "coverage_score": avg("coverage_score"),
         "overall_score": avg("overall_score"),
