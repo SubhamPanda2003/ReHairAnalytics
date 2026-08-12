@@ -7,6 +7,7 @@ import Navbar from "@/components/Navbar";
 import ScoreRing from "@/components/ScoreRing";
 import MetricDelta from "@/components/MetricDelta";
 import ChangeMaps from "@/components/ChangeMaps";
+import ExperimentalDensity from "@/components/ExperimentalDensity";
 import { Button } from "@/components/ui/button";
 import {
   AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription,
@@ -210,6 +211,9 @@ export default function Results() {
 
             {/* Visual change map */}
             <ChangeMaps sessionId={sessionId} testId="change-maps" />
+
+            {/* Experimental density estimate -- opt-in, off by default */}
+            <ExperimentalDensity sessionId={sessionId} testId="experimental-density" />
 
             {/* Comparisons */}
             <div className="grid md:grid-cols-2 gap-6 mb-6">

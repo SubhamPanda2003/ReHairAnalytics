@@ -85,6 +85,70 @@ async def get_change_maps(session_id: str, user: CurrentUser):
     return {"maps": results}
 
 
+@router.get("/sessions/{session_id}/density-estimate")
+async def get_density_estimate(session_id: str, user: CurrentUser):
+    """EXPERIMENTAL rough hairs/cm^2 estimate from this session's best
+    front-facing photo. See image_utils.estimate_hair_density for exactly what
+    this does and doesn't measure -- it's real OpenCV computation (face-based
+    scale calibration + color-cluster coverage segmentation), not an LLM
+    guess, but the hairs/cm^2 conversion itself is an unvalidated modeling
+    assumption, so this always carries a wide, explicitly stated margin.
+
+    The margin's coverage_segmentation term is then adjusted per-photo by an
+    LLM assessment of conditions that actually affect it (hair color, hair/
+    scalp contrast, lighting) -- the LLM never touches the hairs/cm^2 number
+    itself, only how much to trust the color-clustering step for this
+    specific photo. If that assessment call fails, it degrades to worst-case
+    (wider margin), not silently narrower.
+
+    404s when no photo in this session gets a confident face detection,
+    rather than returning a fabricated number."""
+    s = await db.tracking_sessions.find_one({"id": session_id, "user_id": user["user_id"]}, {"_id": 0})
+    if not s:
+        raise HTTPException(status_code=404, detail="Session not found")
+    images = await db.images.find({"tracking_session_id": session_id}, {"_id": 0}).to_list(200)
+    if not images:
+        raise HTTPException(status_code=404, detail="No photos in this session")
+
+    by_region = sessions_service.best_per_region(images)
+    candidates = [by_region[key] for key in ("front", "hairline") if key in by_region]
+    seen = {c["id"] for c in candidates}
+    remaining = sorted(
+        (i for i in images if i["id"] not in seen),
+        key=lambda i: (i.get("confidence", 0), i.get("quality_score", 0)), reverse=True,
+    )
+    candidates.extend(remaining)
+
+    for img in candidates:
+        try:
+            data, _ = await asyncio.to_thread(store.get_object, img["storage_path"])
+            result = await asyncio.to_thread(image_utils.estimate_hair_density, data)
+        except Exception:
+            continue
+        if not result:
+            continue
+
+        try:
+            b64 = await asyncio.to_thread(image_utils.to_base64_jpeg, data)
+            reliability = await ai_service.assess_density_reliability(b64, session_id)
+            adjusted_pct, flags = sessions_service.adjusted_coverage_segmentation_error(reliability)
+            sources = dict(result["error_sources"])
+            sources["coverage_segmentation"] = adjusted_pct
+            calib = {"confidence": result["calibration_confidence"]}
+            result = image_utils.density_result(result["hairs_per_cm2"], result["coverage_fraction"], calib, sources)
+            result["quality_flags"] = flags
+        except Exception:
+            pass  # keep the un-adjusted (base-margin) result rather than losing the estimate entirely
+
+        result["source_region"] = img.get("region") or img.get("view")
+        return result
+
+    raise HTTPException(
+        status_code=422,
+        detail="Couldn't get a confident face detection in any photo from this session -- this estimate needs a clear, front-facing shot.",
+    )
+
+
 @router.post("/scan")
 async def auto_scan(
     user: CurrentUser,

@@ -246,3 +246,59 @@ async def generate_summary(
             "within a stable range. For the most reliable long-term trends, keep capturing photos under similar "
             "lighting, distance, and angle each week."
         )
+
+
+_HAIR_COLOR_CATEGORIES = ("dark", "light_or_gray", "mixed_or_unclear")
+_CONTRAST_LEVELS = ("high", "medium", "low")
+_LIGHTING_LEVELS = ("even", "uneven")
+
+
+async def assess_density_reliability(image_b64: str, session_id: str) -> dict:
+    """Used by the experimental hairs/cm^2 estimate (see utils/image_utils.py)
+    to widen or narrow its stated error margin per-photo, based on conditions a
+    vision model can actually judge from a picture. This is deliberately NOT
+    asked to estimate density, count hairs, or produce any number that feeds
+    into the hairs/cm^2 figure itself -- that stays pure OpenCV. It only flags
+    known failure modes of the color-clustering segmentation: light/gray hair
+    (breaks the "darkest cluster is hair" heuristic), low hair-scalp color
+    contrast, and uneven lighting -- so the reported uncertainty reflects this
+    specific photo instead of one fixed number for every photo.
+
+    On any failure, returns worst-case values (forces a WIDER margin, never a
+    narrower one) rather than silently assuming best-case conditions.
+    """
+    system = (
+        "You assess photographic conditions for a color-based hair/scalp image segmentation pipeline. "
+        "You are NOT estimating hair count, density, or any measurement -- only describing what's "
+        "visible that affects whether color-based pixel classification will work well on this photo. "
+        "Respond ONLY with strict JSON."
+    )
+    prompt = (
+        "Look at this photo of a person's hair/scalp area. Assess three things: "
+        "hair_color_category -- one of 'dark' (black/dark brown hair), 'light_or_gray' (blonde/gray/white/"
+        "very light hair), 'mixed_or_unclear'. "
+        "contrast_with_scalp -- one of 'high', 'medium', 'low': how visually distinct the hair color is "
+        "from the visible scalp/skin color in this photo. "
+        "lighting_quality -- one of 'even', 'uneven': whether there are harsh shadows or glare across the region. "
+        "Also give confidence (0-100) in this assessment. "
+        "Return strict JSON: {\"hair_color_category\":str,\"contrast_with_scalp\":str,\"lighting_quality\":str,\"confidence\":int}."
+    )
+    try:
+        chat = _new_chat(session_id, system, temperature=MEASUREMENT_TEMPERATURE)
+        msg = UserMessage(text=prompt, file_contents=[ImageContent(image_base64=image_b64)])
+        resp = await chat.send_message(msg)
+        data = _extract_json(resp)
+        hair_color = data.get("hair_color_category")
+        contrast = data.get("contrast_with_scalp")
+        lighting = data.get("lighting_quality")
+        return {
+            "hair_color_category": hair_color if hair_color in _HAIR_COLOR_CATEGORIES else "mixed_or_unclear",
+            "contrast_with_scalp": contrast if contrast in _CONTRAST_LEVELS else "medium",
+            "lighting_quality": lighting if lighting in _LIGHTING_LEVELS else "uneven",
+            "confidence": _clamp(data.get("confidence"), default=40),
+        }
+    except Exception as e:
+        logger.error(f"assess_density_reliability failed: {e}")
+        # Worst-case defaults -- a failed assessment must widen the margin, not
+        # silently assume favorable conditions.
+        return {"hair_color_category": "mixed_or_unclear", "contrast_with_scalp": "low", "lighting_quality": "uneven", "confidence": 0}
