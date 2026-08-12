@@ -149,6 +149,42 @@ def best_per_region(images: list[dict]) -> dict:
     return best
 
 
+async def matched_best_images(session_a_id: str, session_b_id: str) -> dict:
+    """Best photo from each session for a side-by-side comparison, picked from
+    the SAME region when both sessions captured one -- comparing session A's
+    front photo against session B's crown photo side-by-side would silently be
+    comparing two different parts of the scalp, not progress in one place.
+    Prefers "front" (present in nearly every scan mode), then whichever other
+    region both sessions share, in REGION_ORDER. Falls back to each session's
+    independent best-overall photo only when they share no region at all.
+
+    Returns {"a_path": str|None, "b_path": str|None, "region": str|None,
+    "matched": bool}. matched=False means the fallback ran and the pair may show
+    different regions -- callers should caveat that in the UI.
+    """
+    imgs_a = await db.images.find({"tracking_session_id": session_a_id}, {"_id": 0}).to_list(200)
+    imgs_b = await db.images.find({"tracking_session_id": session_b_id}, {"_id": 0}).to_list(200)
+    by_region_a = best_per_region(imgs_a)
+    by_region_b = best_per_region(imgs_b)
+    shared = [r for r in REGION_ORDER if r in by_region_a and r in by_region_b]
+    if shared:
+        region = "front" if "front" in shared else shared[0]
+        return {
+            "a_path": by_region_a[region]["storage_path"],
+            "b_path": by_region_b[region]["storage_path"],
+            "region": region,
+            "matched": True,
+        }
+    a_best = max(imgs_a, key=lambda i: (i.get("confidence", 0), i.get("quality_score", 0))) if imgs_a else None
+    b_best = max(imgs_b, key=lambda i: (i.get("confidence", 0), i.get("quality_score", 0))) if imgs_b else None
+    return {
+        "a_path": a_best["storage_path"] if a_best else None,
+        "b_path": b_best["storage_path"] if b_best else None,
+        "region": None,
+        "matched": False,
+    }
+
+
 async def get_baseline_session_id(user_id: str) -> Optional[str]:
     first = await db.tracking_sessions.find({"user_id": user_id}, {"_id": 0, "id": 1}).sort("week_number", 1).to_list(1)
     return first[0]["id"] if first else None
@@ -255,25 +291,49 @@ async def _blended_baseline(all_sessions: list[dict]) -> Optional[dict]:
 
 
 async def get_comparison_context(user_id: str, session_id: str) -> dict:
-    """Baseline/previous analysis + best image, relative to session_id, for the session detail view."""
+    """Baseline/previous analysis + best images, relative to session_id, for the
+    session detail view. When a distinct baseline exists, its photo and this
+    session's photo are picked from the SAME region (see matched_best_images) so
+    the side-by-side comparison shows the same part of the scalp, not whichever
+    photo happened to score highest in each session independently.
+    """
     all_sessions = await db.tracking_sessions.find({"user_id": user_id}, {"_id": 0}).sort("week_number", 1).to_list(1000)
+    if not all_sessions:
+        return {
+            "previous_analysis": None, "previous_best_image": None,
+            "baseline_analysis": None, "baseline_best_image": None,
+            "current_best_image": None, "photo_comparison_region_matched": None,
+        }
+
+    baseline_id = all_sessions[0]["id"]
+    is_baseline = baseline_id == session_id
+    idx = next((i for i, x in enumerate(all_sessions) if x["id"] == session_id), 0)
+
     previous = None
-    baseline = None
     previous_best = None
-    baseline_best = None
-    if all_sessions:
-        baseline = await _blended_baseline(all_sessions)
-        baseline_best = await best_image_path(all_sessions[0]["id"])
-        idx = next((i for i, x in enumerate(all_sessions) if x["id"] == session_id), 0)
-        if idx > 0:
-            previous = await db.analysis.find_one({"tracking_session_id": all_sessions[idx - 1]["id"]}, {"_id": 0})
-            previous_best = await best_image_path(all_sessions[idx - 1]["id"])
-    is_baseline = bool(all_sessions and all_sessions[0]["id"] == session_id)
+    if idx > 0:
+        previous = await db.analysis.find_one({"tracking_session_id": all_sessions[idx - 1]["id"]}, {"_id": 0})
+        previous_best = await best_image_path(all_sessions[idx - 1]["id"])
+
+    if is_baseline:
+        return {
+            "previous_analysis": previous,
+            "previous_best_image": previous_best,
+            "baseline_analysis": None,
+            "baseline_best_image": None,
+            "current_best_image": await best_image_path(session_id),
+            "photo_comparison_region_matched": None,
+        }
+
+    baseline = await _blended_baseline(all_sessions)
+    matched = await matched_best_images(baseline_id, session_id)
     return {
         "previous_analysis": previous,
         "previous_best_image": previous_best,
-        "baseline_analysis": None if is_baseline else baseline,
-        "baseline_best_image": None if is_baseline else baseline_best,
+        "baseline_analysis": baseline,
+        "baseline_best_image": matched["a_path"],
+        "current_best_image": matched["b_path"],
+        "photo_comparison_region_matched": matched["matched"],
     }
 
 

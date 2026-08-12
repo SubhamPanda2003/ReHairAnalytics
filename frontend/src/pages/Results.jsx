@@ -179,6 +179,11 @@ export default function Results() {
               <motion.div initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.15 }}
                 className="rounded-3xl border border-border bg-card p-6 md:p-8 mb-6" data-testid="side-by-side">
                 <h3 className="font-heading font-semibold text-lg mb-4">Baseline vs current</h3>
+                {s.photo_comparison_region_matched === false && (
+                  <p className="text-xs text-amber-600 dark:text-amber-500 bg-amber-500/10 rounded-xl px-3 py-2 mb-4" data-testid="region-mismatch-warning">
+                    These two photos weren't captured from the same angle — your baseline and this scan don't share a common region, so this comparison may show different parts of your scalp.
+                  </p>
+                )}
                 {a.framing_note && (!a.framing_note.aligned || (a.framing_note.scale_shift_pct ?? 0) > 20) && (
                   <p className="text-xs text-amber-600 dark:text-amber-500 bg-amber-500/10 rounded-xl px-3 py-2 mb-4" data-testid="framing-warning">
                     {!a.framing_note.aligned

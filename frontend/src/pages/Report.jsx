@@ -123,9 +123,16 @@ export default function Report() {
 
               {/* Side by side */}
               {detail?.baseline_best_image && detail?.current_best_image && (
-                <div className="grid grid-cols-2 gap-4 mb-8">
-                  <figure><div className="rounded-2xl overflow-hidden border border-border"><img src={fileUrl(detail.baseline_best_image)} alt="baseline" className="w-full aspect-square object-cover" /></div><figcaption className="text-center text-xs text-muted-foreground mt-2 uppercase tracking-[0.15em]">Baseline</figcaption></figure>
-                  <figure><div className="rounded-2xl overflow-hidden border border-primary/40"><img src={fileUrl(detail.current_best_image)} alt="current" className="w-full aspect-square object-cover" /></div><figcaption className="text-center text-xs text-primary mt-2 uppercase tracking-[0.15em]">Latest</figcaption></figure>
+                <div className="mb-8">
+                  {detail.photo_comparison_region_matched === false && (
+                    <p className="text-xs text-amber-600 dark:text-amber-500 bg-amber-500/10 rounded-xl px-3 py-2 mb-3">
+                      Baseline and latest don't share a captured region in common, so these photos may show different parts of your scalp.
+                    </p>
+                  )}
+                  <div className="grid grid-cols-2 gap-4">
+                    <figure><div className="rounded-2xl overflow-hidden border border-border"><img src={fileUrl(detail.baseline_best_image)} alt="baseline" className="w-full aspect-square object-cover" /></div><figcaption className="text-center text-xs text-muted-foreground mt-2 uppercase tracking-[0.15em]">Baseline</figcaption></figure>
+                    <figure><div className="rounded-2xl overflow-hidden border border-primary/40"><img src={fileUrl(detail.current_best_image)} alt="current" className="w-full aspect-square object-cover" /></div><figcaption className="text-center text-xs text-primary mt-2 uppercase tracking-[0.15em]">Latest</figcaption></figure>
+                  </div>
                 </div>
               )}
 

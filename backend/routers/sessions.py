@@ -36,7 +36,8 @@ async def get_session(session_id: str, user: CurrentUser):
     imgs.sort(key=lambda i: (i.get("confidence", 0), i.get("quality_score", 0)), reverse=True)
     s["images"] = imgs
     s["analysis"] = await db.analysis.find_one({"tracking_session_id": session_id}, {"_id": 0})
-    s["current_best_image"] = imgs[0].get("storage_path") if imgs else None
+    # current_best_image is set by get_comparison_context, region-matched against
+    # the baseline photo when a distinct baseline exists.
     s.update(await sessions_service.get_comparison_context(user["user_id"], session_id))
     return s
 
