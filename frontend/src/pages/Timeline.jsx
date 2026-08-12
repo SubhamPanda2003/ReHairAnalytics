@@ -34,9 +34,13 @@ export default function Timeline() {
     onError: (e) => toast.error(e.response?.data?.detail || "Could not delete this scan"),
   });
 
-  // timeline is sorted oldest-first by the backend -- same order it uses to pick baseline.
-  const isBaseline = !!toDelete && timeline?.[0]?.id === toDelete.id;
-  const nextBaseline = isBaseline ? timeline?.[1] : null;
+  // Baseline is an average of the earliest BASELINE_BLEND_N scans (see
+  // services/sessions.py), not just the single oldest one -- timeline is sorted
+  // oldest-first by the backend, same order used to pick which scans contribute.
+  const BASELINE_BLEND_N = 3;
+  const deleteIndex = toDelete ? (timeline || []).findIndex((s) => s.id === toDelete.id) : -1;
+  const affectsBaseline = deleteIndex !== -1 && deleteIndex < BASELINE_BLEND_N;
+  const remainingCount = (timeline?.length || 0) - (toDelete ? 1 : 0);
 
   return (
     <div className="min-h-screen bg-background" data-testid="timeline-page">
@@ -125,10 +129,10 @@ export default function Timeline() {
             <AlertDialogTitle>Delete this scan?</AlertDialogTitle>
             <AlertDialogDescription>
               This permanently removes this scan and all its photos. This cannot be undone.
-              {isBaseline && nextBaseline && (
-                <> This is currently your baseline — after deleting it, your {new Date(nextBaseline.date).toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" })} scan becomes the new baseline.</>
+              {affectsBaseline && remainingCount > 0 && (
+                <> Your baseline is averaged from your earliest scans — deleting this one will recalculate it from your {Math.min(BASELINE_BLEND_N, remainingCount)} remaining earliest scan{Math.min(BASELINE_BLEND_N, remainingCount) === 1 ? "" : "s"}.</>
               )}
-              {isBaseline && !nextBaseline && (
+              {affectsBaseline && remainingCount === 0 && (
                 <> This is your only scan — deleting it clears your history.</>
               )}
             </AlertDialogDescription>

@@ -17,20 +17,24 @@ import { ArrowLeft, Sparkles, TrendingUp, TrendingDown, Minus, Loader2, FileText
 
 const fetchSession = async (id) => (await api.get(`/sessions/${id}`)).data;
 
-const Delta = ({ label, cur, ref }) => {
+const Delta = ({ label, cur, ref, noiseFloor }) => {
   if (cur === null || cur === undefined || ref === null || ref === undefined) return null;
   const d = Math.round((cur - ref) * 10) / 10;
-  const Icon = d > 0 ? TrendingUp : d < 0 ? TrendingDown : Minus;
-  const cls = d > 0 ? "text-primary" : d < 0 ? "text-destructive" : "text-muted-foreground";
+  const withinNoise = noiseFloor != null && Math.abs(d) < noiseFloor;
+  const Icon = withinNoise ? Minus : d > 0 ? TrendingUp : d < 0 ? TrendingDown : Minus;
+  const cls = withinNoise ? "text-muted-foreground" : d > 0 ? "text-primary" : d < 0 ? "text-destructive" : "text-muted-foreground";
   return (
     <div className="flex items-center justify-between py-2 border-b border-border last:border-0">
       <span className="text-sm text-muted-foreground">{label}</span>
-      <span className={`text-sm font-semibold flex items-center gap-1 ${cls}`}><Icon className="w-3.5 h-3.5" />{d > 0 ? "+" : ""}{d}</span>
+      <span className={`text-sm font-semibold flex items-center gap-1 ${cls}`}>
+        <Icon className="w-3.5 h-3.5" />{d > 0 ? "+" : ""}{d}
+        {withinNoise && <span className="text-[10px] font-normal italic ml-0.5">(noise)</span>}
+      </span>
     </div>
   );
 };
 
-const ComparisonCard = ({ title, ref, a }) => {
+const ComparisonCard = ({ title, ref, a, noiseFloor }) => {
   if (!ref) return (
     <div className="rounded-2xl border border-border bg-card p-6">
       <h3 className="font-heading font-semibold mb-2">{title}</h3>
@@ -39,11 +43,14 @@ const ComparisonCard = ({ title, ref, a }) => {
   );
   return (
     <div className="rounded-2xl border border-border bg-card p-6" data-testid={`comparison-${title.toLowerCase().replace(/\s/g, "-")}`}>
-      <h3 className="font-heading font-semibold mb-3">{title}</h3>
-      <Delta label="Density" cur={a.density_score} ref={ref.density_score} />
-      <Delta label="Coverage" cur={a.coverage_score} ref={ref.coverage_score} />
-      <Delta label="Hairline" cur={a.hairline_score} ref={ref.hairline_score} />
-      <Delta label="Overall" cur={a.overall_score} ref={ref.overall_score} />
+      <h3 className="font-heading font-semibold mb-1">{title}</h3>
+      {ref.blended_from_sessions > 1 && (
+        <p className="text-[11px] text-muted-foreground mb-2">Averaged across your first {ref.blended_from_sessions} scans, not just day one.</p>
+      )}
+      <Delta label="Density" cur={a.density_score} ref={ref.density_score} noiseFloor={noiseFloor} />
+      <Delta label="Coverage" cur={a.coverage_score} ref={ref.coverage_score} noiseFloor={noiseFloor} />
+      <Delta label="Hairline" cur={a.hairline_score} ref={ref.hairline_score} noiseFloor={noiseFloor} />
+      <Delta label="Overall" cur={a.overall_score} ref={ref.overall_score} noiseFloor={noiseFloor} />
     </div>
   );
 };
@@ -68,6 +75,12 @@ export default function Results() {
   if (isLoading) return <div className="min-h-screen bg-background"><Navbar /><div className="flex justify-center py-24"><Loader2 className="w-7 h-7 animate-spin text-primary" /></div></div>;
 
   const a = s?.analysis;
+  // How much this session's own scores would plausibly wobble on a re-read (see
+  // measurement_spread in finalize_day_analysis) -- deltas smaller than this are
+  // shown as neutral rather than a confident up/down, since they're not
+  // distinguishable from ordinary AI scoring noise. Falls back to a documented
+  // default when this session has no measured spread of its own.
+  const noiseFloor = a?.measurement_spread ?? 4;
 
   return (
     <div className="min-h-screen bg-background" data-testid="results-page">
@@ -99,28 +112,33 @@ export default function Results() {
               <div className="grid grid-cols-2 md:grid-cols-4 gap-6 justify-items-center">
                 <div className="flex flex-col items-center">
                   <ScoreRing value={a.density_score} label="Density" color="hsl(var(--chart-1))" testId="ring-density" />
-                  <MetricDelta current={a.density_score} baseline={s.baseline_analysis?.density_score} testId="delta-density" />
+                  <MetricDelta current={a.density_score} baseline={s.baseline_analysis?.density_score} testId="delta-density" noiseFloor={noiseFloor} />
                 </div>
                 <div className="flex flex-col items-center">
                   <ScoreRing value={a.coverage_score} label="Coverage" color="hsl(var(--chart-2))" testId="ring-coverage" />
-                  <MetricDelta current={a.coverage_score} baseline={s.baseline_analysis?.coverage_score} testId="delta-coverage" />
+                  <MetricDelta current={a.coverage_score} baseline={s.baseline_analysis?.coverage_score} testId="delta-coverage" noiseFloor={noiseFloor} />
                 </div>
                 <div className="flex flex-col items-center">
                   <ScoreRing value={a.hairline_score} label="Hairline" color="hsl(var(--chart-3))" testId="ring-hairline" />
                   <MetricDelta
                     current={a.hairline_score} baseline={s.baseline_analysis?.hairline_score} testId="delta-hairline"
                     emptyLabel={a.hairline_score == null ? "No hairline reading this scan" : "This is your baseline"}
+                    noiseFloor={noiseFloor}
                   />
                 </div>
                 <div className="flex flex-col items-center">
                   <ScoreRing value={a.overall_score} label="Overall" color="hsl(var(--chart-4))" testId="ring-overall" />
-                  <MetricDelta current={a.overall_score} baseline={s.baseline_analysis?.overall_score} testId="delta-overall" />
+                  <MetricDelta current={a.overall_score} baseline={s.baseline_analysis?.overall_score} testId="delta-overall" noiseFloor={noiseFloor} />
                 </div>
               </div>
-              <div className="grid grid-cols-3 gap-4 mt-8 text-center">
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 mt-8 text-center">
                 <div><p className="text-xs uppercase tracking-[0.15em] text-muted-foreground">Image quality</p><p className="font-heading text-2xl font-bold">{a.quality_score}</p></div>
                 <div><p className="text-xs uppercase tracking-[0.15em] text-muted-foreground">Confidence</p><p className="font-heading text-2xl font-bold">{a.confidence}%</p></div>
                 <div><p className="text-xs uppercase tracking-[0.15em] text-muted-foreground">Visible scalp</p><p className="font-heading text-2xl font-bold">{a.visible_scalp_pct}%</p></div>
+                <div data-testid="measurement-spread">
+                  <p className="text-xs uppercase tracking-[0.15em] text-muted-foreground">Reading precision</p>
+                  <p className="font-heading text-2xl font-bold">±{noiseFloor}</p>
+                </div>
               </div>
             </motion.div>
 
@@ -161,6 +179,13 @@ export default function Results() {
               <motion.div initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.15 }}
                 className="rounded-3xl border border-border bg-card p-6 md:p-8 mb-6" data-testid="side-by-side">
                 <h3 className="font-heading font-semibold text-lg mb-4">Baseline vs current</h3>
+                {a.framing_note && (!a.framing_note.aligned || (a.framing_note.scale_shift_pct ?? 0) > 20) && (
+                  <p className="text-xs text-amber-600 dark:text-amber-500 bg-amber-500/10 rounded-xl px-3 py-2 mb-4" data-testid="framing-warning">
+                    {!a.framing_note.aligned
+                      ? "This photo looks like it was taken from a noticeably different angle or distance than your baseline — treat score changes with extra caution until your next scan."
+                      : `This photo appears roughly ${a.framing_note.scale_shift_pct}% closer/farther than your baseline photo — some of the score difference may be framing, not real change.`}
+                  </p>
+                )}
                 <div className="grid grid-cols-2 gap-4">
                   <figure>
                     <div className="rounded-2xl overflow-hidden border border-border">
@@ -183,8 +208,8 @@ export default function Results() {
 
             {/* Comparisons */}
             <div className="grid md:grid-cols-2 gap-6 mb-6">
-              <ComparisonCard title="vs Previous" ref={s.previous_analysis} a={a} />
-              <ComparisonCard title="vs Baseline" ref={s.baseline_analysis} a={a} />
+              <ComparisonCard title="vs Previous" ref={s.previous_analysis} a={a} noiseFloor={noiseFloor} />
+              <ComparisonCard title="vs Baseline" ref={s.baseline_analysis} a={a} noiseFloor={noiseFloor} />
             </div>
 
             {/* Images */}

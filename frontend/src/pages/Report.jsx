@@ -101,10 +101,15 @@ export default function Report() {
                   <div key={label} className="rounded-2xl border border-border p-4">
                     <p className="text-xs uppercase tracking-[0.15em] text-muted-foreground">{label}</p>
                     <p className="font-heading text-3xl font-bold">{val ?? "—"}</p>
-                    <MetricDelta current={val} baseline={base} testId={`report-delta-${label.toLowerCase()}`} />
+                    <MetricDelta current={val} baseline={base} testId={`report-delta-${label.toLowerCase()}`} noiseFloor={progress?.noise_floor} />
                   </div>
                 ))}
               </div>
+              {progress?.noise_floor != null && (
+                <p className="text-[11px] text-muted-foreground -mt-6 mb-8">
+                  Based on repeat AI readings of this week's photos, changes smaller than ±{progress.noise_floor} points are within normal measurement variation, not confirmed change.
+                </p>
+              )}
 
               {/* Measurement quality */}
               {a && (
@@ -130,7 +135,10 @@ export default function Report() {
               {/* Trend */}
               {points.length > 1 && (
                 <div className="mb-8">
-                  <h3 className="font-heading font-semibold mb-3">Trend over time</h3>
+                  <h3 className="font-heading font-semibold mb-1">Trend over time</h3>
+                  <p className="text-xs text-muted-foreground mb-3">
+                    "Overall (smoothed)" averages each point with the one before it, so a single noisy reading doesn't look like a real swing.
+                  </p>
                   <ResponsiveContainer width="100%" height={240}>
                     <LineChart data={points} margin={{ left: -20, right: 8 }}>
                       <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" vertical={false} />
@@ -141,6 +149,7 @@ export default function Report() {
                       <Line type="monotone" dataKey="density" stroke="hsl(var(--chart-1))" strokeWidth={2.5} dot={{ r: 3 }} />
                       <Line type="monotone" dataKey="coverage" stroke="hsl(var(--chart-2))" strokeWidth={2.5} dot={{ r: 3 }} />
                       <Line type="monotone" dataKey="hairline" stroke="hsl(var(--chart-3))" strokeWidth={2.5} dot={{ r: 3 }} />
+                      <Line type="monotone" dataKey="overall_smoothed" name="Overall (smoothed)" stroke="hsl(var(--chart-4))" strokeWidth={2} strokeDasharray="4 4" dot={{ r: 2 }} />
                     </LineChart>
                   </ResponsiveContainer>
                 </div>

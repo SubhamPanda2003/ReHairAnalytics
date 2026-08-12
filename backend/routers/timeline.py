@@ -16,6 +16,12 @@ async def timeline(user: CurrentUser):
     return await sessions_service.attach_children(sessions)
 
 
+# Used only when a session has no measured spread at all (e.g. ensembling never
+# ran because the photo couldn't be re-fetched) -- a documented assumption, not a
+# measured value, so treat it as conservative rather than precise.
+DEFAULT_NOISE_FLOOR = 4
+
+
 @router.get("/progress")
 async def progress(user: CurrentUser):
     sessions = await db.tracking_sessions.find({"user_id": user["user_id"]}, {"_id": 0}).sort("week_number", 1).to_list(1000)
@@ -33,10 +39,20 @@ async def progress(user: CurrentUser):
                 "hairline": a.get("hairline_score"),
                 "quality": a.get("quality_score", 0),
                 "overall": a["overall_score"],
+                "spread": a.get("measurement_spread"),
             })
+    # Trailing 2-point rolling average of "overall", so the trend chart can offer a
+    # smoothed line alongside the raw one -- a single point's noise washes out less
+    # when it's not the only thing on screen.
+    for i, p in enumerate(points):
+        window = points[max(0, i - 1):i + 1]
+        p["overall_smoothed"] = round(sum(w["overall"] for w in window) / len(window), 1)
+
     latest = points[-1] if points else None
     baseline = points[0] if points else None
     streak = len(sessions)
+    noise_floor = (latest.get("spread") if latest else None)
+    noise_floor = noise_floor if noise_floor is not None else DEFAULT_NOISE_FLOOR
     est_progress = None
     if latest and baseline and latest != baseline:
         def _delta(key):
@@ -61,6 +77,7 @@ async def progress(user: CurrentUser):
         "baseline": baseline,
         "streak": streak,
         "estimated_progress": est_progress,
+        "noise_floor": noise_floor,
         "last_date": last_date,
         "days_since_last": days_since,
         "total_uploads": await db.images.count_documents({"user_id": user["user_id"]}),

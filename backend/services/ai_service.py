@@ -11,9 +11,24 @@ logger = logging.getLogger(__name__)
 EMERGENT_LLM_KEY = os.environ.get("EMERGENT_LLM_KEY")
 MODEL = ("openai", "gpt-5.6-terra")
 
+# Low temperature for anything that produces a *measurement* meant to be compared
+# week over week -- default sampling temperature is tuned for varied, creative
+# text, which is the opposite of what a repeatable number needs. This isn't
+# verified against the real emergentintegrations SDK (no live credentials in this
+# dev environment), so it's applied defensively: if with_model() doesn't accept a
+# temperature kwarg in the installed SDK version, fall back to the old call
+# instead of crashing every AI request.
+MEASUREMENT_TEMPERATURE = 0.0
 
-def _new_chat(session_id: str, system_message: str) -> LlmChat:
+
+def _new_chat(session_id: str, system_message: str, temperature: float = None) -> LlmChat:
     chat = LlmChat(api_key=EMERGENT_LLM_KEY, session_id=session_id, system_message=system_message)
+    if temperature is not None:
+        try:
+            chat.with_model(*MODEL, temperature=temperature)
+            return chat
+        except TypeError:
+            logger.warning("LlmChat.with_model() doesn't accept temperature in this SDK version; continuing without it.")
     chat.with_model(*MODEL)
     return chat
 
@@ -59,7 +74,7 @@ async def analyze_quality(image_b64: str, view: str, session_id: str) -> dict:
         "Set retry=true only if quality < 60. Keep issues concise (max 4)."
     )
     try:
-        chat = _new_chat(session_id, system)
+        chat = _new_chat(session_id, system, temperature=MEASUREMENT_TEMPERATURE)
         msg = UserMessage(text=prompt, file_contents=[ImageContent(image_base64=image_b64)])
         resp = await chat.send_message(msg)
         data = _extract_json(resp)
@@ -103,17 +118,34 @@ async def analyze_metrics(image_b64: str, view: str, session_id: str, region: st
         "\"density_score\":int,\"coverage_score\":int,"
         "\"overall_score\":int,\"confidence\":int,\"quality\":int,\"visible_scalp_pct\":int,\"hair_coverage_pct\":int"
     )
+    # Fixed reference points so "70" means the same thing on every photo, every
+    # week, regardless of hair color, lighting, or camera exposure -- without a
+    # calibration anchor the model has to invent its own sense of the scale each
+    # time, which is a source of both call-to-call noise and long-term drift.
+    calibration = (
+        "Calibration for density_score/coverage_score: 20-35=sparse, scalp clearly dominant through the hair; "
+        "45-60=moderate thinning, scalp visible but hair still the majority; "
+        "65-80=healthy visible density, scalp only glimpsed on close inspection; "
+        "85-100=full, no visible thinning. "
+    )
+    if include_hairline:
+        calibration += (
+            "Calibration for hairline_score: 20-35=hairline receded well past a youthful line with deep temple "
+            "recession; 45-60=mild-to-moderate recession or temple thinning; 65-80=minor recession, close to a "
+            "youthful line; 85-100=full, low, straight hairline with no recession. "
+        )
     prompt = (
         f"Analyze this hair/scalp photo (view='{view}', focus region='{region}'). {focus} "
         f"Estimate objective visible metrics on a 0-100 scale: {metrics_list}"
         "overall_score (weighted blend). Give confidence (0-100) — how reliably this exact frame shows the "
         "focus region (low if blurry, off-angle, too far, or the region is not clearly visible). Also give "
         "quality (0-100) for photographic usability. "
+        + calibration
         + ("" if include_hairline else "This view does not show the frontal hairline -- do not estimate hairline_score. ")
         + f"Return strict JSON: {{{schema}}}."
     )
     try:
-        chat = _new_chat(session_id, system)
+        chat = _new_chat(session_id, system, temperature=MEASUREMENT_TEMPERATURE)
         msg = UserMessage(text=prompt, file_contents=[ImageContent(image_base64=image_b64)])
         resp = await chat.send_message(msg)
         data = _extract_json(resp)
@@ -140,11 +172,30 @@ async def analyze_metrics(image_b64: str, view: str, session_id: str, region: st
         }
 
 
-async def generate_summary(current: dict, previous: dict, baseline: dict, session_id: str) -> str:
+async def generate_summary(
+    current: dict, previous: dict, baseline: dict, session_id: str,
+    current_b64: str = None, baseline_b64: str = None, heatmap_b64: str = None,
+) -> str:
+    """Write the "AI insight" shown on Results/Report. When photo(s) are
+    available, the model actually looks at them instead of only being handed
+    numbers -- a text-only prompt can only ever restate a score delta in words,
+    which reads as generic ("density improved slightly, keep it up"). Given the
+    photos and the change-map heatmap, it can say WHERE it sees change (or
+    doesn't), and whether that visual evidence agrees with the reported score
+    movement or looks like normal photo-to-photo variation instead.
+    """
     system = (
-        "You are an assistant explaining objective hair growth measurements. "
-        "Never diagnose disease. Explain only observed changes. Keep response under 120 words. "
-        "Be encouraging, factual, and non-medical."
+        "You are giving a hair-tracking user genuine, specific insight into their own photos and "
+        "measurements -- not a script that recites numbers back at them. When photos are provided, "
+        "actually describe what's visible: where hair looks fuller or thinner, whether any visible "
+        "change looks concentrated in one area or spread evenly, and whether what you see agrees "
+        "with the reported score movement or looks like normal photo-to-photo variation instead. "
+        "If a change-map image is provided, it's the two photos aligned and diffed -- warmer "
+        "(red/yellow) areas mark more visible pixel change, cooler (blue) areas mark little to none; "
+        "describe roughly where the change is, don't just mention that a map was given. "
+        "Never diagnose disease, never use clinical staging language, never invent a measurement you "
+        "weren't given. End with exactly one specific tip grounded in what you actually observed -- "
+        "not a generic reminder to be consistent. Keep the whole response under 130 words."
     )
 
     def diff(a, b, key):
@@ -156,6 +207,13 @@ async def generate_summary(current: dict, previous: dict, baseline: dict, sessio
 
     hairline_current = current.get("hairline_score")
     hairline_current = "n/a" if hairline_current is None else hairline_current
+    image_notes = []
+    if current_b64:
+        image_notes.append("Image 1 is today's photo.")
+    if baseline_b64:
+        image_notes.append("Image 2 is the baseline photo to compare against.")
+    if heatmap_b64:
+        image_notes.append("Image 3 is the change-map (aligned diff, warm = more visible change).")
     prompt = (
         "Structured metrics (0-100 scale).\n"
         f"Current: density={current.get('density_score')}, coverage={current.get('coverage_score')}, "
@@ -164,11 +222,22 @@ async def generate_summary(current: dict, previous: dict, baseline: dict, sessio
         f"coverage={diff(current, previous, 'coverage_score')}, hairline={diff(current, previous, 'hairline_score')}.\n"
         f"Change vs baseline: density={diff(current, baseline, 'density_score')}, "
         f"coverage={diff(current, baseline, 'coverage_score')}, hairline={diff(current, baseline, 'hairline_score')}.\n"
-        "Write a concise, non-diagnostic explanation of the observed changes and one tip for consistent tracking."
+        + (" ".join(image_notes) + "\n" if image_notes else "")
+        + "Write the insight now: describe what you actually observe, relate it to the measurements "
+        "above, and end with one specific, grounded tip."
     )
+    file_contents = []
+    if current_b64:
+        file_contents.append(ImageContent(image_base64=current_b64))
+    if baseline_b64:
+        file_contents.append(ImageContent(image_base64=baseline_b64))
+    if heatmap_b64:
+        file_contents.append(ImageContent(image_base64=heatmap_b64))
+
     try:
         chat = _new_chat(session_id, system)
-        resp = await chat.send_message(UserMessage(text=prompt))
+        msg = UserMessage(text=prompt, file_contents=file_contents or None)
+        resp = await chat.send_message(msg)
         return (resp or "").strip()
     except Exception as e:
         logger.error(f"generate_summary failed: {e}")

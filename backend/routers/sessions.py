@@ -234,10 +234,16 @@ async def analyze_session(session_id: str, user: CurrentUser):
     primary = next((i for i in images if i["view"] == "top"), None) or next((i for i in images if i["view"] == "front"), None) or images[0]
     data, _ = await asyncio.to_thread(store.get_object, primary["storage_path"])
     b64 = await asyncio.to_thread(image_utils.to_base64_jpeg, data)
-    metrics = await ai_service.analyze_metrics(b64, primary["view"], session_id)
+    first_call = await ai_service.analyze_metrics(b64, primary["view"], session_id)
+    first_call["quality_score"] = first_call.pop("quality")
+    metrics, spread = await sessions_service.ensemble_score(b64, primary["view"], "full", session_id, first_call)
 
     baseline, previous = await sessions_service.get_baseline_and_previous(user["user_id"], session_id)
-    summary = await ai_service.generate_summary(metrics, previous or {}, baseline or {}, session_id)
+    visual = await sessions_service.compute_visual_context(user["user_id"], session_id, primary["storage_path"], current_bytes=data)
+    summary = await ai_service.generate_summary(
+        metrics, previous or {}, baseline or {}, session_id,
+        current_b64=visual["current_b64"], baseline_b64=visual["baseline_b64"], heatmap_b64=visual["heatmap_b64"],
+    )
 
     avg_quality = int(sum(i["quality_score"] for i in images) / len(images))
     doc = {
@@ -246,6 +252,8 @@ async def analyze_session(session_id: str, user: CurrentUser):
         "user_id": user["user_id"],
         **metrics,
         "quality_score": avg_quality,
+        "measurement_spread": spread,
+        "framing_note": visual["framing_note"],
         "region": s.get("region", "full"),
         "ai_summary": summary,
         "created_at": datetime.now(timezone.utc).isoformat(),
