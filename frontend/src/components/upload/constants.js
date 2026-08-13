@@ -14,6 +14,8 @@ export const VIEWS = [
   { key: "back", label: "Back" },
 ];
 
+export const POSE_COUNTDOWN_S = 3; // reposition window shown before capture resumes each new pose
+
 export const REGION_PARAMS = {
   full: {
     duration: 30, interval: 1000, target: 6,

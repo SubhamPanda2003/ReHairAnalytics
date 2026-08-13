@@ -3,6 +3,7 @@ import { Button } from "@/components/ui/button";
 import { Sun, SunDim, Volume2, VolumeX, X } from "lucide-react";
 import useRegionCapture from "@/hooks/useRegionCapture";
 import { BURST_DURATION_S, BURST_KEEP } from "./constants";
+import Silhouette from "./Silhouette";
 
 /** Full-screen burst-capture for a single region: auto-fires shots for
  * BURST_DURATION_S seconds and hands the sharpest BURST_KEEP back via
@@ -34,6 +35,7 @@ export default function RegionCaptureOverlay({ region, open, onClose, onCaptured
     >
       <div className="relative rounded-full overflow-hidden shadow-2xl w-[min(70vw,300px)] aspect-square shrink-0" style={{ background: "#000" }}>
         <video ref={videoRef} autoPlay playsInline muted className="w-full h-full object-cover -scale-x-100" />
+        <Silhouette pose={region.key} />
         <svg viewBox={`0 0 ${size} ${size}`} className="absolute inset-0 w-full h-full -rotate-90">
           <circle cx={size / 2} cy={size / 2} r={r} fill="none" stroke="rgba(255,255,255,0.3)" strokeWidth={stroke} />
           <circle cx={size / 2} cy={size / 2} r={r} fill="none" stroke="hsl(var(--primary))" strokeWidth={stroke}

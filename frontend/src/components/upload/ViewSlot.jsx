@@ -39,7 +39,7 @@ export default function ViewSlot({ region, state, onCapture, onFile }) {
           <img src={state.preview} alt={region.key} className="absolute inset-0 w-full h-full object-cover" />
         ) : (
           <div className="text-center px-4">
-            <Silhouette />
+            <Silhouette pose={region.key} />
             <UploadCloud className="w-7 h-7 text-muted-foreground mx-auto mb-2 relative" />
             <p className="text-xs text-muted-foreground relative">{region.guide}</p>
           </div>

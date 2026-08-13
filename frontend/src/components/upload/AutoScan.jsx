@@ -6,8 +6,8 @@ import Silhouette from "./Silhouette";
 
 export default function AutoScan() {
   const {
-    videoRef, region, setRegion, phase, progress, count, guide,
-    screenLight, setScreenLight, voiceOn, setVoiceOn, params, start, cancel,
+    videoRef, region, setRegion, phase, progress, count, guide, pose, countdown,
+    screenLight, setScreenLight, voiceOn, setVoiceOn, params, totalDurationS, start, cancel,
   } = useAutoScan();
 
   const size = 300, stroke = 9, r = (size - stroke) / 2, circ = 2 * Math.PI * r;
@@ -40,10 +40,10 @@ export default function AutoScan() {
               <p className="text-xs text-muted-foreground">Selfie camera preview<br />appears full-screen on start</p>
             </div>
           </div>
-          <p className="text-sm text-muted-foreground mt-4 text-center">Move for {params.duration}s while it captures — we keep the sharpest photo of each area.</p>
+          <p className="text-sm text-muted-foreground mt-4 text-center">Takes about {totalDurationS}s — a 3s countdown before each pose gives you time to get into position, then we keep the sharpest photo of each area.</p>
           <div className="flex flex-wrap items-center justify-center gap-3 mt-4">
             <Button onClick={start} className="rounded-full h-12 px-8 text-base" data-testid="start-scan-btn">
-              <Play className="w-5 h-5 mr-1.5" /> Start {params.duration}s scan
+              <Play className="w-5 h-5 mr-1.5" /> Start {totalDurationS}s scan
             </Button>
             <Button variant="outline" onClick={() => setScreenLight((v) => !v)} className="rounded-full h-12" data-testid="light-btn">
               {screenLight ? <Sun className="w-4 h-4 mr-1.5" /> : <SunDim className="w-4 h-4 mr-1.5" />} Screen light {screenLight ? "on" : "off"}
@@ -59,18 +59,26 @@ export default function AutoScan() {
         <div className={`fixed inset-0 z-[60] flex flex-col items-center justify-center gap-4 sm:gap-6 px-6 py-6 overflow-y-auto transition-colors duration-300 ${screenLight ? "bg-white text-stone-700" : "bg-neutral-900 text-white"}`} data-testid="scan-overlay">
           <div className="relative rounded-full overflow-hidden shadow-2xl w-[min(70vw,300px)] aspect-square shrink-0" style={{ background: "#000" }}>
             <video ref={videoRef} autoPlay playsInline muted className="w-full h-full object-cover -scale-x-100" />
+            <Silhouette pose={pose} />
             <svg viewBox={`0 0 ${size} ${size}`} className="absolute inset-0 w-full h-full -rotate-90">
               <circle cx={size / 2} cy={size / 2} r={r} fill="none" stroke="rgba(255,255,255,0.3)" strokeWidth={stroke} />
               <circle cx={size / 2} cy={size / 2} r={r} fill="none" stroke="hsl(var(--primary))" strokeWidth={stroke}
                 strokeDasharray={circ} strokeDashoffset={circ - (progress / 100) * circ} strokeLinecap="round" style={{ transition: "stroke-dashoffset 0.2s linear" }} />
             </svg>
-            {phase === "uploading" && <div className="absolute inset-0 bg-black/60 flex flex-col items-center justify-center gap-2 text-white"><Loader2 className="w-7 h-7 animate-spin" /><span className="text-sm">Averaging photos…</span></div>}
+            {countdown != null && (
+              <div className="absolute inset-0 flex items-center justify-center pointer-events-none" data-testid="pose-countdown">
+                <span className="text-white text-7xl font-heading font-bold drop-shadow-[0_2px_8px_rgba(0,0,0,0.6)]">{countdown}</span>
+              </div>
+            )}
+            {phase === "uploading" && <div className="absolute inset-0 bg-black/60 flex flex-col items-center justify-center gap-2 text-white"><Loader2 className="w-7 h-7 animate-spin" /><span className="text-sm">Analyzing photos…</span></div>}
           </div>
 
           {phase === "scanning" ? (
             <>
               <p className="text-xl sm:text-2xl font-heading font-bold text-center max-w-md" data-testid="scan-guide">{guide}</p>
-              <p className="text-sm font-medium">{count} photos · {Math.round(progress)}%</p>
+              <p className="text-sm font-medium">
+                {countdown != null ? `Get ready… ${countdown}` : `${count} photos · ${Math.round(progress)}%`}
+              </p>
               <div className="flex flex-wrap items-center justify-center gap-3">
                 <Button variant="outline" onClick={() => setScreenLight((v) => !v)} className={`rounded-full h-11 ${screenLight ? "" : "bg-white/10 border-white/30 text-white hover:bg-white/20"}`} data-testid="light-toggle">
                   {screenLight ? <Sun className="w-4 h-4 mr-1.5" /> : <SunDim className="w-4 h-4 mr-1.5" />} Light {screenLight ? "on" : "off"}

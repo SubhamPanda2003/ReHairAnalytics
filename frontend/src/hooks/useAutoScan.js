@@ -2,27 +2,36 @@ import { useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { toast } from "sonner";
 import { api } from "@/lib/api";
-import { REGION_PARAMS } from "@/components/upload/constants";
+import { REGION_PARAMS, POSE_COUNTDOWN_S } from "@/components/upload/constants";
 
-/** Drives the guided selfie-camera capture loop: timed frame grabs, a live
- * sharpness score per frame, and uploading the sharpest ones to /scan. */
+/** Drives the guided selfie-camera capture loop: for each pose in sequence,
+ * announce it, give the user a POSE_COUNTDOWN_S countdown to get into
+ * position (no frames captured during that window), then fire timed frame
+ * grabs with a live sharpness score until it's time for the next pose.
+ * Once every pose is done, announce that analysis is starting and upload the
+ * sharpest frames to /scan. */
 export default function useAutoScan() {
   const navigate = useNavigate();
   const videoRef = useRef(null);
   const streamRef = useRef(null);
   const framesRef = useRef([]);
-  const timersRef = useRef({ cap: null, prog: null, final: null });
+  const timersRef = useRef({ cap: null, prog: null, countdown: null, segEnd: null });
+  const segIndexRef = useRef(0);
+  const segStartRef = useRef(0);
 
   const [region, setRegion] = useState("full");
   const [phase, setPhase] = useState("idle"); // idle | scanning | uploading
   const [progress, setProgress] = useState(0);
   const [count, setCount] = useState(0);
   const [guide, setGuide] = useState("");
+  const [pose, setPose] = useState("front"); // current segment's guide shape for the alignment overlay
+  const [countdown, setCountdown] = useState(null); // 3..1 while repositioning, null while capturing
   const [screenLight, setScreenLight] = useState(true);
   const [voiceOn, setVoiceOnState] = useState(true);
   const voiceOnRef = useRef(true);
 
   const params = REGION_PARAMS[region];
+  const totalDurationS = params.duration + params.guides.length * POSE_COUNTDOWN_S;
 
   // Mirrored into a ref so the scan-loop's setInterval callback (a closure captured
   // once per `start()` call) always reads the latest toggle, not a stale one.
@@ -49,8 +58,8 @@ export default function useAutoScan() {
 
   const clearTimers = () => {
     const t = timersRef.current;
-    clearInterval(t.cap); clearInterval(t.prog); clearTimeout(t.final);
-    t.cap = t.prog = t.final = null;
+    clearInterval(t.cap); clearInterval(t.prog); clearTimeout(t.countdown); clearTimeout(t.segEnd);
+    t.cap = t.prog = t.countdown = t.segEnd = null;
   };
 
   const uploadFrames = async () => {
@@ -90,14 +99,12 @@ export default function useAutoScan() {
     }
     streamRef.current = stream;
     framesRef.current = [];
-    setCount(0); setProgress(0); setGuide(params.guides[0]); setPhase("scanning");
-    speak(params.guides[0]);
-    let lastSegment = 0;
+    segIndexRef.current = 0;
+    setCount(0); setProgress(0); setPhase("scanning");
 
     const canvas = document.createElement("canvas");
     const sharpCanvas = document.createElement("canvas");
     sharpCanvas.width = 96; sharpCanvas.height = 96;
-    const started = Date.now();
 
     const sharpness = () => {
       const v = videoRef.current;
@@ -114,41 +121,77 @@ export default function useAutoScan() {
       return sum;
     };
 
-    const capture = () => {
-      const v = videoRef.current;
-      if (!v || !v.videoWidth) return;
-      const el = (Date.now() - started) / 1000;
-      const seg = Math.min(params.guides.length - 1, Math.floor(el / (params.duration / params.guides.length)));
-      const fr = params.regionMap ? params.regionMap[seg] : region;
-      const sharp = sharpness();
-      canvas.width = v.videoWidth; canvas.height = v.videoHeight;
-      canvas.getContext("2d").drawImage(v, 0, 0);
-      canvas.toBlob((b) => { if (b) { framesRef.current.push({ blob: b, region: fr, sharp }); setCount(framesRef.current.length); } }, "image/jpeg", 0.9);
+    const sliceDurationMs = (params.duration * 1000) / params.guides.length;
+    const segTotalMs = POSE_COUNTDOWN_S * 1000 + sliceDurationMs;
+
+    const finishScan = () => {
+      clearTimers();
+      setCountdown(null);
+      setProgress(100);
+      stopStream();
+      if (framesRef.current.length === 0) { toast.error("No frames captured"); setPhase("idle"); return; }
+      speak("Analyzing all the photos, please wait.");
+      uploadFrames();
     };
 
-    timersRef.current.cap = setInterval(capture, params.interval);
-    setTimeout(capture, 600);
+    const beginCapture = (segIndex, poseKey) => {
+      const captureOnce = () => {
+        const v = videoRef.current;
+        if (!v || !v.videoWidth) return;
+        const sharp = sharpness();
+        canvas.width = v.videoWidth; canvas.height = v.videoHeight;
+        canvas.getContext("2d").drawImage(v, 0, 0);
+        canvas.toBlob((b) => { if (b) { framesRef.current.push({ blob: b, region: poseKey, sharp }); setCount(framesRef.current.length); } }, "image/jpeg", 0.9);
+      };
+      captureOnce();
+      timersRef.current.cap = setInterval(captureOnce, params.interval);
+      timersRef.current.segEnd = setTimeout(() => {
+        clearInterval(timersRef.current.cap); timersRef.current.cap = null;
+        runSegment(segIndex + 1);
+      }, sliceDurationMs);
+    };
+
+    const startCountdown = (onDone) => {
+      let n = POSE_COUNTDOWN_S;
+      setCountdown(n);
+      const tick = () => {
+        n -= 1;
+        if (n > 0) {
+          setCountdown(n);
+          timersRef.current.countdown = setTimeout(tick, 1000);
+        } else {
+          setCountdown(null);
+          onDone();
+        }
+      };
+      timersRef.current.countdown = setTimeout(tick, 1000);
+    };
+
+    const runSegment = (segIndex) => {
+      if (segIndex >= params.guides.length) { finishScan(); return; }
+      segIndexRef.current = segIndex;
+      segStartRef.current = Date.now();
+      const guideText = params.guides[segIndex];
+      const poseKey = params.regionMap ? params.regionMap[segIndex] : region;
+      setGuide(guideText);
+      setPose(poseKey);
+      speak(guideText);
+      startCountdown(() => beginCapture(segIndex, poseKey));
+    };
+
     timersRef.current.prog = setInterval(() => {
-      const el = (Date.now() - started) / 1000;
-      setProgress(Math.min(100, (el / params.duration) * 100));
-      const seg = Math.min(params.guides.length - 1, Math.floor(el / (params.duration / params.guides.length)));
-      setGuide(params.guides[seg]);
-      if (seg !== lastSegment) {
-        lastSegment = seg;
-        speak(params.guides[seg]);
-      }
+      const el = Date.now() - segStartRef.current;
+      const segFrac = Math.min(1, el / segTotalMs);
+      setProgress(Math.min(100, ((segIndexRef.current + segFrac) / params.guides.length) * 100));
     }, 200);
-    timersRef.current.final = setTimeout(() => {
-      clearTimers(); setProgress(100); stopStream();
-      if (framesRef.current.length === 0) { toast.error("No frames captured"); setPhase("idle"); return; }
-      uploadFrames();
-    }, params.duration * 1000);
+
+    runSegment(0);
   };
 
   const cancel = () => {
     clearTimers(); stopStream();
     if ("speechSynthesis" in window) window.speechSynthesis.cancel();
-    framesRef.current = []; setCount(0); setProgress(0); setPhase("idle");
+    framesRef.current = []; setCount(0); setProgress(0); setCountdown(null); setPhase("idle");
   };
 
   // Attach the live stream once the scanning overlay (and its <video>) is mounted.
@@ -174,7 +217,7 @@ export default function useAutoScan() {
   }, []);
 
   return {
-    videoRef, region, setRegion, phase, progress, count, guide, params, start, cancel,
+    videoRef, region, setRegion, phase, progress, count, guide, pose, countdown, params, totalDurationS, start, cancel,
     screenLight, setScreenLight, voiceOn, setVoiceOn,
   };
 }
