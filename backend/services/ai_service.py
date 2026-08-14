@@ -284,7 +284,13 @@ async def assess_density_reliability(image_b64: str, session_id: str) -> dict:
         "Return strict JSON: {\"hair_color_category\":str,\"contrast_with_scalp\":str,\"lighting_quality\":str,\"confidence\":int}."
     )
     try:
-        chat = _new_chat(session_id, system, temperature=MEASUREMENT_TEMPERATURE)
+        # Suffixed so this never shares an underlying conversation thread with
+        # estimate_density_llm's very different system prompt for the same
+        # photo -- both get called back-to-back in the same request, and if
+        # the SDK/provider treats session_id as a persistent thread, mixing
+        # two different task instructions into one conversation risks the
+        # model answering the wrong one.
+        chat = _new_chat(f"{session_id}:density-reliability", system, temperature=MEASUREMENT_TEMPERATURE)
         msg = UserMessage(text=prompt, file_contents=[ImageContent(image_base64=image_b64)])
         resp = await chat.send_message(msg)
         data = _extract_json(resp)
@@ -332,7 +338,10 @@ async def estimate_density_llm(image_b64: str, session_id: str) -> dict:
         "Return strict JSON: {\"hairs_per_cm2\":int,\"confidence\":int,\"reasoning\":str}."
     )
     try:
-        chat = _new_chat(session_id, system, temperature=MEASUREMENT_TEMPERATURE)
+        # Suffixed so this never shares an underlying conversation thread with
+        # assess_density_reliability's very different system prompt for the
+        # same photo -- see that function's matching comment.
+        chat = _new_chat(f"{session_id}:density-llm-guess", system, temperature=MEASUREMENT_TEMPERATURE)
         msg = UserMessage(text=prompt, file_contents=[ImageContent(image_base64=image_b64)])
         resp = await chat.send_message(msg)
         data = _extract_json(resp)
@@ -341,6 +350,11 @@ async def estimate_density_llm(image_b64: str, session_id: str) -> dict:
         except Exception:
             hairs = None
         reasoning = str(data.get("reasoning") or "").strip()[:300] or None
+        if hairs is None:
+            # The call itself succeeded but nothing usable came back -- log the
+            # raw response (not just "it failed") so this is actually
+            # diagnosable instead of a silent, unexplained gap in the UI.
+            logger.warning(f"estimate_density_llm: no usable hairs_per_cm2 in response: {(resp or '')[:300]!r}")
         return {"hairs_per_cm2": hairs, "confidence": _clamp(data.get("confidence"), default=0), "reasoning": reasoning}
     except Exception as e:
         logger.error(f"estimate_density_llm failed: {e}")

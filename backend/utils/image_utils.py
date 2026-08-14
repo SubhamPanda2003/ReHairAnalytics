@@ -2,14 +2,26 @@ import io
 import os
 import cv2
 import numpy as np
-from PIL import Image
+from PIL import Image, ImageOps
 
 
 def process_image(data: bytes, max_dim: int = 1600, quality: int = 82):
-    """Strip metadata, resize, compress. Returns (jpeg_bytes, content_type)."""
+    """Strip metadata, resize, compress. Returns (jpeg_bytes, content_type).
+
+    Applies EXIF orientation (exif_transpose) before stripping metadata.
+    Without this, a photo with a non-default EXIF Orientation tag -- common
+    for anything that went through a phone's native camera/gallery rather
+    than this app's own canvas-captured selfie flow -- gets its orientation
+    hint discarded while the pixel data itself stays sideways/upside-down,
+    permanently, since the tag that could have corrected it later is gone.
+    That silently breaks anything downstream that reads raw pixels without
+    its own orientation logic: YuNet face detection, the coverage ROI
+    placement, thumbnails -- all of it.
+    """
     img = Image.open(io.BytesIO(data))
     if getattr(img, "is_animated", False):
         img.seek(0)
+    img = ImageOps.exif_transpose(img)
     img = img.convert("RGB")
     img.thumbnail((max_dim, max_dim), Image.LANCZOS)
     out = io.BytesIO()
@@ -210,24 +222,21 @@ def _get_face_detector(w: int, h: int):
     return _face_detector
 
 
-def detect_face_calibration(image_bytes: bytes) -> "dict | None":
-    """Detect the most confident face via YuNet and derive a physical scale
-    (mm per pixel) from its eye distance vs. population-average IPD.
-    Returns None only when no face is found at all (or the eye distance is
-    degenerate) -- never calibrates off a guess. Unlike an earlier version of
-    this function, a low YuNet confidence score no longer causes a reject by
-    itself; the raw confidence is returned instead so the caller can show it
-    and let the estimate through with an honestly-low confidence rather than
-    silently discarding a real (if imperfect) face detection. Returns
-    {"mm_per_px", "eye_mid_px", "confidence", "image_size"}.
-    """
-    img = _decode_bgr(image_bytes)
-    if img is None:
-        return None
-    h, w = img.shape[:2]
+def _rotate_bgr(img, angle: int):
+    if angle == 90:
+        return cv2.rotate(img, cv2.ROTATE_90_CLOCKWISE)
+    if angle == 180:
+        return cv2.rotate(img, cv2.ROTATE_180)
+    if angle == 270:
+        return cv2.rotate(img, cv2.ROTATE_90_COUNTERCLOCKWISE)
+    return img
+
+
+def _detect_face_in_frame(frame) -> "dict | None":
+    h, w = frame.shape[:2]
     try:
         detector = _get_face_detector(w, h)
-        _, faces = detector.detect(img)
+        _, faces = detector.detect(frame)
     except Exception:
         return None
     if faces is None or len(faces) == 0:
@@ -246,6 +255,39 @@ def detect_face_calibration(image_bytes: bytes) -> "dict | None":
     }
 
 
+def detect_face_calibration(image_bytes: bytes) -> "dict | None":
+    """Detect the most confident face via YuNet and derive a physical scale
+    (mm per pixel) from its eye distance vs. population-average IPD.
+    Returns None only when no face is found at all in any orientation (or
+    the eye distance is degenerate) -- never calibrates off a guess. Unlike
+    an earlier version of this function, a low YuNet confidence score no
+    longer causes a reject by itself; the raw confidence is returned instead
+    so the caller can show it and let the estimate through with an
+    honestly-low confidence rather than silently discarding a real (if
+    imperfect) face detection.
+
+    Tries the image upright first, then rotated 90/180/270 if that finds
+    nothing. Upright covers every canvas-captured selfie from this app's own
+    scan flow (never rotated); the fallback exists for file-picker uploads of
+    photos stored sideways relative to their pixel data -- most commonly a
+    photo that predates the fix to process_image()'s EXIF-orientation
+    handling, since a live YuNet install genuinely does not reliably find a
+    90-degree-rotated face. Returns {"mm_per_px", "eye_mid_px", "confidence",
+    "image_size", "rotation"} -- rotation is 0 unless a rotated attempt is
+    what actually found the face.
+    """
+    img = _decode_bgr(image_bytes)
+    if img is None:
+        return None
+    for angle in (0, 90, 180, 270):
+        frame = img if angle == 0 else _rotate_bgr(img, angle)
+        result = _detect_face_in_frame(frame)
+        if result:
+            result["rotation"] = angle
+            return result
+    return None
+
+
 def estimate_hair_coverage(image_bytes: bytes, calib: dict) -> "float | None":
     """Fraction of pixels classified as hair-colored (vs. scalp/skin) in a
     calibration-sized region positioned relative to the detected eyes, via
@@ -256,6 +298,7 @@ def estimate_hair_coverage(image_bytes: bytes, calib: dict) -> "float | None":
     img = _decode_bgr(image_bytes)
     if img is None:
         return None
+    img = _rotate_bgr(img, calib.get("rotation", 0))  # match the frame calibration was computed in
     w, h = calib["image_size"]
     mm_per_px = calib["mm_per_px"]
     ex, ey = calib["eye_mid_px"]
@@ -306,6 +349,7 @@ def density_result(hairs_per_cm2: float, coverage: float, calib: dict, error_sou
         "coverage_fraction": round(coverage, 3),
         "calibration_confidence": round(calib["confidence"], 2),
         "error_sources": dict(error_sources),
+        "rotation": calib.get("rotation", 0),
     }
 
 

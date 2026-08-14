@@ -148,6 +148,15 @@ async def get_density_estimate(session_id: str, user: CurrentUser):
 
         b64 = await asyncio.to_thread(image_utils.to_base64_jpeg, data)
 
+        # Non-zero only when the straight (upright) detection attempt found
+        # nothing and a rotated retry is what actually found the face -- see
+        # image_utils.detect_face_calibration. Surfaced so a stored-sideways
+        # photo is visible to the user, not just silently corrected.
+        rotation_flags = (
+            [f"This photo needed a {result['rotation']}° rotation to detect a face — it may be stored sideways"]
+            if result.get("rotation") else []
+        )
+
         cv_estimate = {
             "hairs_per_cm2": result["hairs_per_cm2"],
             "margin_pct": result["margin_pct"],
@@ -156,7 +165,7 @@ async def get_density_estimate(session_id: str, user: CurrentUser):
             "coverage_fraction": result["coverage_fraction"],
             "confidence": result["calibration_confidence"],
             "error_sources": result["error_sources"],
-            "quality_flags": [],
+            "quality_flags": rotation_flags,
         }
         try:
             reliability = await ai_service.assess_density_reliability(b64, session_id)
@@ -173,7 +182,7 @@ async def get_density_estimate(session_id: str, user: CurrentUser):
                 "coverage_fraction": adjusted["coverage_fraction"],
                 "confidence": adjusted["calibration_confidence"],
                 "error_sources": adjusted["error_sources"],
-                "quality_flags": flags,
+                "quality_flags": rotation_flags + flags,
             }
         except Exception:
             pass  # keep the un-adjusted (base-margin) cv_estimate rather than losing it entirely
