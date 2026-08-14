@@ -185,40 +185,6 @@ async def matched_best_images(session_a_id: str, session_b_id: str) -> dict:
     }
 
 
-def adjusted_coverage_segmentation_error(reliability: dict) -> tuple:
-    """Widen or narrow the density estimate's base coverage_segmentation error
-    term (see image_utils.ERROR_SOURCES_PCT) using an LLM's per-photo
-    assessment of conditions known to affect color-clustering reliability --
-    NOT the LLM inventing the error number itself, just flagging real, named
-    failure modes of the underlying heuristic (see
-    image_utils.estimate_hair_coverage's "darkest cluster is hair" comment).
-    Bounded to [20, 60] so one LLM call can't swing the figure wildly.
-
-    Returns (adjusted_pct, flags) where flags are short, user-facing reasons
-    for the adjustment -- always populated so "why is my margin this wide"
-    has a real answer instead of an opaque number.
-    """
-    base = image_utils.ERROR_SOURCES_PCT["coverage_segmentation"]
-    pct = base
-    flags = []
-    if reliability["hair_color_category"] == "light_or_gray":
-        pct += 15
-        flags.append("Light or gray hair is harder to distinguish from scalp color than dark hair")
-    if reliability["contrast_with_scalp"] == "low":
-        pct += 12
-        flags.append("Low visual contrast between hair and scalp in this photo")
-    elif reliability["contrast_with_scalp"] == "high":
-        pct -= 8
-        flags.append("Good hair/scalp color contrast in this photo")
-    if reliability["lighting_quality"] == "uneven":
-        pct += 8
-        flags.append("Uneven lighting (shadows or glare) detected")
-    if reliability["confidence"] < 40:
-        pct += 8
-        flags.append("Low confidence in this photo-condition assessment itself")
-    return max(20, min(60, round(pct))), flags
-
-
 async def get_baseline_session_id(user_id: str) -> Optional[str]:
     first = await db.tracking_sessions.find({"user_id": user_id}, {"_id": 0, "id": 1}).sort("week_number", 1).to_list(1)
     return first[0]["id"] if first else None

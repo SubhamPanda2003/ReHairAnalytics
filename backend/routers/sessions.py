@@ -87,31 +87,11 @@ async def get_change_maps(session_id: str, user: CurrentUser):
 
 @router.get("/sessions/{session_id}/density-estimate")
 async def get_density_estimate(session_id: str, user: CurrentUser):
-    """EXPERIMENTAL rough hairs/cm^2 reading from this session's best
-    front-facing photo, returned as TWO independent, clearly separate
-    estimates -- never blended into one number:
-
-    - cv_estimate: real OpenCV computation (see image_utils.estimate_hair_density
-      for exactly what this does and doesn't measure -- face-based scale
-      calibration + color-cluster coverage segmentation). Its margin's
-      coverage_segmentation term is adjusted per-photo by an LLM assessment
-      of conditions that actually affect it (hair color, hair/scalp
-      contrast, lighting) -- that call never touches the hairs/cm^2 number
-      itself, only how much to trust the color-clustering step for this
-      specific photo (see ai_service.assess_density_reliability).
-    - llm_estimate: a separate, direct visual guess from the LLM looking at
-      the same photo, with its own self-reported confidence (see
-      ai_service.estimate_density_llm). This is exactly what the CV estimate
-      deliberately avoids doing -- it's shown alongside the CV number,
-      clearly labeled as a guess, so you can see where the two agree or
-      diverge, not because it's a more-trustworthy alternative.
-
-    No fixed confidence cutoff gates this anymore -- if a face is detected at
-    all, both estimates are returned along with the real face-detection
-    confidence, so you can judge reliability yourself instead of getting a
-    silent reject on a borderline-but-real photo. This only 422s when no
-    face was detected in ANY photo in the session, and the error lists
-    exactly which photos were tried and why each one failed.
+    """EXPERIMENTAL rough hairs/cm^2 reading from this session's best photo --
+    a direct LLM visual guess (see ai_service.estimate_density_llm), not a
+    measurement. No CV pipeline behind this: no face detection, no scale
+    calibration, no pixel segmentation -- just the model looking at the photo
+    and giving its own number, confidence, and reasoning.
     """
     s = await db.tracking_sessions.find_one({"id": session_id, "user_id": user["user_id"]}, {"_id": 0})
     if not s:
@@ -121,92 +101,26 @@ async def get_density_estimate(session_id: str, user: CurrentUser):
         raise HTTPException(status_code=404, detail="No photos in this session")
 
     by_region = sessions_service.best_per_region(images)
-    candidates = [by_region[key] for key in ("front", "hairline") if key in by_region]
-    seen = {c["id"] for c in candidates}
-    remaining = sorted(
-        (i for i in images if i["id"] not in seen),
-        key=lambda i: (i.get("confidence", 0), i.get("quality_score", 0)), reverse=True,
-    )
-    candidates.extend(remaining)
+    candidate = next((by_region[key] for key in ("front", "hairline") if key in by_region), None)
+    if candidate is None:
+        candidate = max(images, key=lambda i: (i.get("confidence", 0), i.get("quality_score", 0)))
+    region_label = candidate.get("region") or candidate.get("view") or "unknown"
 
-    tried = []
-    for img in candidates:
-        region_label = img.get("region") or img.get("view") or "unknown"
-        try:
-            data, _ = await asyncio.to_thread(store.get_object, img["storage_path"])
-        except Exception:
-            tried.append(f"{region_label} photo — couldn't load it")
-            continue
-        try:
-            result = await asyncio.to_thread(image_utils.estimate_hair_density, data)
-        except Exception:
-            tried.append(f"{region_label} photo — unexpected error processing it")
-            continue
-        if not result:
-            tried.append(f"{region_label} photo — no face detected in frame")
-            continue
-
+    try:
+        data, _ = await asyncio.to_thread(store.get_object, candidate["storage_path"])
         b64 = await asyncio.to_thread(image_utils.to_base64_jpeg, data)
+    except Exception:
+        raise HTTPException(status_code=422, detail="Couldn't load a photo from this session to estimate from.")
 
-        # Non-zero only when the straight (upright) detection attempt found
-        # nothing and a rotated retry is what actually found the face -- see
-        # image_utils.detect_face_calibration. Surfaced so a stored-sideways
-        # photo is visible to the user, not just silently corrected.
-        rotation_flags = (
-            [f"This photo needed a {result['rotation']}° rotation to detect a face — it may be stored sideways"]
-            if result.get("rotation") else []
+    result = await ai_service.estimate_density_llm(b64, session_id)
+    if result.get("hairs_per_cm2") is None:
+        raise HTTPException(
+            status_code=422,
+            detail="The AI couldn't produce a density guess from this photo -- try a clearer, well-lit shot showing your scalp.",
         )
 
-        cv_estimate = {
-            "hairs_per_cm2": result["hairs_per_cm2"],
-            "margin_pct": result["margin_pct"],
-            "low": result["low"],
-            "high": result["high"],
-            "coverage_fraction": result["coverage_fraction"],
-            "confidence": result["calibration_confidence"],
-            "error_sources": result["error_sources"],
-            "quality_flags": rotation_flags,
-        }
-        try:
-            reliability = await ai_service.assess_density_reliability(b64, session_id)
-            adjusted_pct, flags = sessions_service.adjusted_coverage_segmentation_error(reliability)
-            sources = dict(result["error_sources"])
-            sources["coverage_segmentation"] = adjusted_pct
-            calib = {"confidence": result["calibration_confidence"]}
-            adjusted = image_utils.density_result(result["hairs_per_cm2"], result["coverage_fraction"], calib, sources)
-            cv_estimate = {
-                "hairs_per_cm2": adjusted["hairs_per_cm2"],
-                "margin_pct": adjusted["margin_pct"],
-                "low": adjusted["low"],
-                "high": adjusted["high"],
-                "coverage_fraction": adjusted["coverage_fraction"],
-                "confidence": adjusted["calibration_confidence"],
-                "error_sources": adjusted["error_sources"],
-                "quality_flags": rotation_flags + flags,
-            }
-        except Exception:
-            pass  # keep the un-adjusted (base-margin) cv_estimate rather than losing it entirely
-
-        try:
-            llm_estimate = await ai_service.estimate_density_llm(b64, session_id)
-        except Exception:
-            llm_estimate = {"hairs_per_cm2": None, "confidence": 0, "reasoning": None}
-
-        return {
-            "cv_estimate": cv_estimate,
-            "llm_estimate": llm_estimate,
-            "source_region": region_label,
-        }
-
-    raise HTTPException(
-        status_code=422,
-        detail=(
-            "Couldn't detect a face in any photo from this session, so there's no scale reference to "
-            "measure from. Tried " + str(len(tried)) + ": " + "; ".join(tried) + ". "
-            "This needs at least one clear, forward-facing shot with both eyes visible -- the 'full' "
-            "auto-scan's front pose, or a manual front/hairline capture."
-        ),
-    )
+    result["source_region"] = region_label
+    return result
 
 
 @router.post("/scan")
