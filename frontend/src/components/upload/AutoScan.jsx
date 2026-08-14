@@ -4,11 +4,11 @@ import useAutoScan from "@/hooks/useAutoScan";
 import { REGIONS } from "./constants";
 import Silhouette from "./Silhouette";
 
-export default function AutoScan() {
+export default function AutoScan({ precision = true }) {
   const {
     videoRef, region, setRegion, phase, progress, count, guide, pose, countdown,
     screenLight, setScreenLight, voiceOn, setVoiceOn, params, totalDurationS, start, cancel,
-  } = useAutoScan();
+  } = useAutoScan(precision);
 
   const size = 300, stroke = 9, r = (size - stroke) / 2, circ = 2 * Math.PI * r;
 

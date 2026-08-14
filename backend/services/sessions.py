@@ -364,8 +364,41 @@ def compute_deltas(current: dict, reference: Optional[dict]) -> Optional[dict]:
     }
 
 
-async def finalize_day_analysis(user: dict, session_id: str, region: str) -> dict:
-    """Aggregate every analyzed frame captured today into a single analysis document."""
+async def _compute_density_estimate(images: list[dict], session_id: str) -> Optional[dict]:
+    """Rough hairs/cm^2 guess from the LLM (see ai_service.estimate_density_llm),
+    computed ONCE per scan here and stored on the analysis document -- not
+    re-queried (and not re-billed) every time the UI panel showing it gets
+    opened. Picks the same photo the old on-demand endpoint preferred (front,
+    then hairline, then best overall). Returns None on any failure -- this is
+    an optional, experimental figure and must never block the rest of the
+    scan's analysis from saving.
+    """
+    by_region = best_per_region(images)
+    candidate = next((by_region[k] for k in ("front", "hairline") if k in by_region), None)
+    if candidate is None and images:
+        candidate = max(images, key=lambda i: (i.get("confidence", 0), i.get("quality_score", 0)))
+    if candidate is None:
+        return None
+    try:
+        data, _ = await asyncio.to_thread(store.get_object, candidate["storage_path"])
+        b64 = await asyncio.to_thread(image_utils.to_base64_jpeg, data)
+        result = await ai_service.estimate_density_llm(b64, session_id)
+    except Exception:
+        return None
+    if result.get("hairs_per_cm2") is None:
+        return None
+    result["source_region"] = candidate.get("region") or candidate.get("view") or "unknown"
+    return result
+
+
+async def finalize_day_analysis(user: dict, session_id: str, region: str, precision: bool = True) -> dict:
+    """Aggregate every analyzed frame captured today into a single analysis
+    document. `precision` gates the ensemble re-analysis step below (see
+    _ensemble_frame/ensemble_score) -- on, each region's winning frame gets
+    re-read ENSEMBLE_N-1 more times and the results combined to cancel out
+    per-call scoring noise; off, it's scored from the single existing read,
+    which is faster and cheaper but more exposed to a given call's noise.
+    """
     frames = await db.images.find(
         {"tracking_session_id": session_id, "confidence": {"$exists": True}}, {"_id": 0}
     ).to_list(300)
@@ -404,7 +437,7 @@ async def finalize_day_analysis(user: dict, session_id: str, region: str) -> dic
         topn = []
         for reg, fl in by_region.items():
             best = max(fl, key=lambda x: x.get("confidence", 0))
-            ensembled, spread = await _ensemble_frame(best, session_id)
+            ensembled, spread = await _ensemble_frame(best, session_id) if precision else (best, None)
             topn.append(ensembled)
             reg_metrics = {k: ensembled.get(k, 0) for k in METRIC_KEYS}
             if ensembled.get("hairline_score") is not None:
@@ -439,6 +472,7 @@ async def finalize_day_analysis(user: dict, session_id: str, region: str) -> dic
         metrics, previous or {}, baseline or {}, session_id,
         current_b64=visual["current_b64"], baseline_b64=visual["baseline_b64"], heatmap_b64=visual["heatmap_b64"],
     )
+    density_estimate = await _compute_density_estimate(frames, session_id)
 
     doc = {
         "id": str(uuid.uuid4()),
@@ -453,6 +487,7 @@ async def finalize_day_analysis(user: dict, session_id: str, region: str) -> dic
         "frames_analyzed": len(frames),
         "frames_used": len(topn),
         "ai_summary": summary,
+        "density_estimate": density_estimate,
         "created_at": datetime.now(timezone.utc).isoformat(),
     }
     await db.analysis.delete_many({"tracking_session_id": session_id})

@@ -213,7 +213,7 @@ export default function Results() {
             <ChangeMaps sessionId={sessionId} testId="change-maps" />
 
             {/* Experimental density estimate -- opt-in, off by default */}
-            <ExperimentalDensity sessionId={sessionId} testId="experimental-density" />
+            <ExperimentalDensity estimate={a.density_estimate} testId="experimental-density" />
 
             {/* Comparisons */}
             <div className="grid md:grid-cols-2 gap-6 mb-6">

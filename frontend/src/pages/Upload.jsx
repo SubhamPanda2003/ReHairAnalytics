@@ -5,7 +5,7 @@ import { api } from "@/lib/api";
 import Navbar from "@/components/Navbar";
 import { Button } from "@/components/ui/button";
 import { toast } from "sonner";
-import { Loader2, Scan, Sparkles, UploadCloud } from "lucide-react";
+import { Gauge, Loader2, Scan, Sparkles, UploadCloud } from "lucide-react";
 import AutoScan from "@/components/upload/AutoScan";
 import ViewSlot from "@/components/upload/ViewSlot";
 import RegionCaptureOverlay from "@/components/upload/RegionCaptureOverlay";
@@ -14,6 +14,9 @@ import { SCAN_REGIONS } from "@/components/upload/constants";
 export default function UploadPage() {
   const navigate = useNavigate();
   const [mode, setMode] = useState("auto");
+  // Re-checks each region's reading a couple extra times and blends them,
+  // trading scan time for steadier scores. Sent to /scan as "precision".
+  const [precision, setPrecision] = useState(true);
 
   // Manual mode: per-region burst capture, accumulated client-side until one
   // final /scan submission covering every captured region.
@@ -47,6 +50,7 @@ export default function UploadPage() {
       }
     }
     fd.append("region", "full");
+    fd.append("precision", precision ? "true" : "false");
     try {
       const res = await api.post("/scan", fd, { headers: { "Content-Type": "multipart/form-data" } });
       toast.success(`Analyzed ${res.data.analysis.frames_used} of ${res.data.analysis.frames_analyzed} photos`);
@@ -68,19 +72,30 @@ export default function UploadPage() {
           <p className="text-muted-foreground mt-1">Auto-scan sweeps through every region in one go. Manual lets you capture (or upload) each region yourself.</p>
         </div>
 
-        <div className="inline-flex p-1 rounded-full bg-secondary mb-8" data-testid="mode-toggle">
-          <button onClick={() => setMode("auto")} data-testid="mode-auto"
-            className={`flex items-center gap-2 px-5 py-2 rounded-full text-sm font-medium transition-colors duration-200 ${mode === "auto" ? "bg-primary text-primary-foreground" : "text-muted-foreground"}`}>
-            <Scan className="w-4 h-4" /> Auto-scan
-          </button>
-          <button onClick={() => setMode("manual")} data-testid="mode-manual"
-            className={`flex items-center gap-2 px-5 py-2 rounded-full text-sm font-medium transition-colors duration-200 ${mode === "manual" ? "bg-primary text-primary-foreground" : "text-muted-foreground"}`}>
-            <UploadCloud className="w-4 h-4" /> Manual views
+        <div className="flex flex-wrap items-center justify-between gap-3 mb-6">
+          <div className="inline-flex p-1 rounded-full bg-secondary" data-testid="mode-toggle">
+            <button onClick={() => setMode("auto")} data-testid="mode-auto"
+              className={`flex items-center gap-2 px-5 py-2 rounded-full text-sm font-medium transition-colors duration-200 ${mode === "auto" ? "bg-primary text-primary-foreground" : "text-muted-foreground"}`}>
+              <Scan className="w-4 h-4" /> Auto-scan
+            </button>
+            <button onClick={() => setMode("manual")} data-testid="mode-manual"
+              className={`flex items-center gap-2 px-5 py-2 rounded-full text-sm font-medium transition-colors duration-200 ${mode === "manual" ? "bg-primary text-primary-foreground" : "text-muted-foreground"}`}>
+              <UploadCloud className="w-4 h-4" /> Manual views
+            </button>
+          </div>
+
+          <button
+            onClick={() => setPrecision((v) => !v)}
+            data-testid="precision-toggle"
+            title="Double-checks each area's reading a couple extra times for steadier scores. Turn off for a quicker scan."
+            className={`flex items-center gap-2 px-4 py-2 rounded-full text-sm font-medium border transition-colors duration-200 ${precision ? "border-primary bg-accent/50 text-foreground" : "border-border text-muted-foreground hover:bg-secondary"}`}
+          >
+            <Gauge className="w-4 h-4" /> Precision Mode: {precision ? "On" : "Off"}
           </button>
         </div>
 
         {mode === "auto" ? (
-          <AutoScan />
+          <AutoScan precision={precision} />
         ) : (
           <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-4 md:gap-6">
             {SCAN_REGIONS.map((region) => (

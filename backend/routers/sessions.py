@@ -85,50 +85,13 @@ async def get_change_maps(session_id: str, user: CurrentUser):
     return {"maps": results}
 
 
-@router.get("/sessions/{session_id}/density-estimate")
-async def get_density_estimate(session_id: str, user: CurrentUser):
-    """EXPERIMENTAL rough hairs/cm^2 reading from this session's best photo --
-    a direct LLM visual guess (see ai_service.estimate_density_llm), not a
-    measurement. No CV pipeline behind this: no face detection, no scale
-    calibration, no pixel segmentation -- just the model looking at the photo
-    and giving its own number, confidence, and reasoning.
-    """
-    s = await db.tracking_sessions.find_one({"id": session_id, "user_id": user["user_id"]}, {"_id": 0})
-    if not s:
-        raise HTTPException(status_code=404, detail="Session not found")
-    images = await db.images.find({"tracking_session_id": session_id}, {"_id": 0}).to_list(200)
-    if not images:
-        raise HTTPException(status_code=404, detail="No photos in this session")
-
-    by_region = sessions_service.best_per_region(images)
-    candidate = next((by_region[key] for key in ("front", "hairline") if key in by_region), None)
-    if candidate is None:
-        candidate = max(images, key=lambda i: (i.get("confidence", 0), i.get("quality_score", 0)))
-    region_label = candidate.get("region") or candidate.get("view") or "unknown"
-
-    try:
-        data, _ = await asyncio.to_thread(store.get_object, candidate["storage_path"])
-        b64 = await asyncio.to_thread(image_utils.to_base64_jpeg, data)
-    except Exception:
-        raise HTTPException(status_code=422, detail="Couldn't load a photo from this session to estimate from.")
-
-    result = await ai_service.estimate_density_llm(b64, session_id)
-    if result.get("hairs_per_cm2") is None:
-        raise HTTPException(
-            status_code=422,
-            detail="The AI couldn't produce a density guess from this photo -- try a clearer, well-lit shot showing your scalp.",
-        )
-
-    result["source_region"] = region_label
-    return result
-
-
 @router.post("/scan")
 async def auto_scan(
     user: CurrentUser,
     files: List[UploadFile] = File(...),
     region: str = Form("full"),
     frame_regions: List[str] = Form([]),
+    precision: bool = Form(True),
 ):
     if region not in ("full", "crown", "hairline"):
         region = "full"
@@ -186,7 +149,7 @@ async def auto_scan(
         }
         await db.images.insert_one(dict(doc))
 
-    return await sessions_service.finalize_day_analysis(user, session_id, region)
+    return await sessions_service.finalize_day_analysis(user, session_id, region, precision=precision)
 
 
 @router.post("/sessions/{session_id}/upload")

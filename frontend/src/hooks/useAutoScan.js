@@ -10,7 +10,7 @@ import { REGION_PARAMS, POSE_COUNTDOWN_S } from "@/components/upload/constants";
  * grabs with a live sharpness score until it's time for the next pose.
  * Once every pose is done, announce that analysis is starting and upload the
  * sharpest frames to /scan. */
-export default function useAutoScan() {
+export default function useAutoScan(precision = true) {
   const navigate = useNavigate();
   const videoRef = useRef(null);
   const streamRef = useRef(null);
@@ -78,6 +78,7 @@ export default function useAutoScan() {
     const fd = new FormData();
     selected.forEach((f, i) => { fd.append("files", f.blob, `frame_${i}.jpg`); fd.append("frame_regions", f.region); });
     fd.append("region", region);
+    fd.append("precision", precision ? "true" : "false");
     try {
       const res = await api.post("/scan", fd, { headers: { "Content-Type": "multipart/form-data" } });
       const a = res.data.analysis;
