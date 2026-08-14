@@ -302,3 +302,46 @@ async def assess_density_reliability(image_b64: str, session_id: str) -> dict:
         # Worst-case defaults -- a failed assessment must widen the margin, not
         # silently assume favorable conditions.
         return {"hair_color_category": "mixed_or_unclear", "contrast_with_scalp": "low", "lighting_quality": "uneven", "confidence": 0}
+
+
+async def estimate_density_llm(image_b64: str, session_id: str) -> dict:
+    """A direct, independent LLM visual guess at hairs/cm^2, returned
+    alongside (never blended into) the OpenCV-based estimate in
+    image_utils.estimate_hair_density -- shown side by side purely so the
+    two can be compared. This is deliberately the opposite design choice
+    from assess_density_reliability above: that function refuses to let the
+    LLM guess a number at all; this one explicitly asks for a guess, clearly
+    labeled everywhere it's shown as the LLM's own visual estimate with its
+    own self-reported confidence, not a measurement.
+    """
+    system = (
+        "You are giving a rough VISUAL estimate of scalp hair density from a photo, for informal "
+        "side-by-side comparison against a separate computer-vision measurement -- not a clinical or "
+        "diagnostic tool, and not a substitute for one. Ground your estimate in typical clinical "
+        "trichoscopy reference ranges: sparse/thinning scalp is roughly 40-120 hairs per cm^2, moderate "
+        "density is roughly 120-180, healthy full density is roughly 180-250+ hairs per cm^2. "
+        "Respond ONLY with strict JSON."
+    )
+    prompt = (
+        "Look at this photo of a person's hair/scalp. Give your best rough visual guess of hair density "
+        "in hairs per square centimeter (hairs_per_cm2, integer). Also give your own confidence (0-100) "
+        "in this specific guess based on what's actually visible here -- low confidence if the scalp "
+        "isn't clearly visible, the photo is blurry, poorly lit, or the angle makes it hard to judge. "
+        "Give a one-sentence reasoning grounded in what you actually see (how much scalp shows through, "
+        "hair thickness/coverage, any thinning). "
+        "Return strict JSON: {\"hairs_per_cm2\":int,\"confidence\":int,\"reasoning\":str}."
+    )
+    try:
+        chat = _new_chat(session_id, system, temperature=MEASUREMENT_TEMPERATURE)
+        msg = UserMessage(text=prompt, file_contents=[ImageContent(image_base64=image_b64)])
+        resp = await chat.send_message(msg)
+        data = _extract_json(resp)
+        try:
+            hairs = max(0, int(float(data.get("hairs_per_cm2"))))
+        except Exception:
+            hairs = None
+        reasoning = str(data.get("reasoning") or "").strip()[:300] or None
+        return {"hairs_per_cm2": hairs, "confidence": _clamp(data.get("confidence"), default=0), "reasoning": reasoning}
+    except Exception as e:
+        logger.error(f"estimate_density_llm failed: {e}")
+        return {"hairs_per_cm2": None, "confidence": 0, "reasoning": None}

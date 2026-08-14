@@ -173,7 +173,6 @@ _face_detector_size = None
 # Adult interpupillary distance: real population range is ~50-75mm, with 91.5%
 # of adults between 55-70mm and a mean around 62mm (women ~61mm, men ~64mm).
 AVG_IPD_MM = 62.0
-MIN_FACE_DETECTION_CONFIDENCE = 0.7
 
 # Where to sample coverage, relative to the midpoint between the detected eyes:
 # straight up (toward the hairline/lower scalp) by 55mm, over a 50x50mm patch.
@@ -214,9 +213,13 @@ def _get_face_detector(w: int, h: int):
 def detect_face_calibration(image_bytes: bytes) -> "dict | None":
     """Detect the most confident face via YuNet and derive a physical scale
     (mm per pixel) from its eye distance vs. population-average IPD.
-    Returns None on any failure or low-confidence detection -- never
-    calibrates off a guess. Returns {"mm_per_px", "eye_mid_px", "confidence",
-    "image_size"}.
+    Returns None only when no face is found at all (or the eye distance is
+    degenerate) -- never calibrates off a guess. Unlike an earlier version of
+    this function, a low YuNet confidence score no longer causes a reject by
+    itself; the raw confidence is returned instead so the caller can show it
+    and let the estimate through with an honestly-low confidence rather than
+    silently discarding a real (if imperfect) face detection. Returns
+    {"mm_per_px", "eye_mid_px", "confidence", "image_size"}.
     """
     img = _decode_bgr(image_bytes)
     if img is None:
@@ -230,8 +233,6 @@ def detect_face_calibration(image_bytes: bytes) -> "dict | None":
     if faces is None or len(faces) == 0:
         return None
     face = faces[0]  # highest score first
-    if float(face[-1]) < MIN_FACE_DETECTION_CONFIDENCE:
-        return None
     right_eye = np.array(face[4:6], dtype=np.float64)
     left_eye = np.array(face[6:8], dtype=np.float64)
     px_dist = float(np.linalg.norm(left_eye - right_eye))
