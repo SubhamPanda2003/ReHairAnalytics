@@ -10,6 +10,7 @@ import { Download, Activity, Loader2 } from "lucide-react";
 import MetricDelta from "@/components/MetricDelta";
 import ChangeMaps from "@/components/ChangeMaps";
 import ExperimentalDensity from "@/components/ExperimentalDensity";
+import ScalpMap from "@/components/ScalpMap";
 
 const fetchProgress = async () => (await api.get("/progress")).data;
 const fetchTimeline = async () => (await api.get("/timeline")).data;
@@ -139,6 +140,9 @@ export default function Report() {
 
               {/* Visual change map */}
               <ChangeMaps sessionId={latestSession?.id} testId="report-change-maps" />
+
+              {/* Scalp visibility map (color-based patch highlight, per region) */}
+              <ScalpMap perRegion={a?.per_region} testId="report-scalp-map" />
 
               {/* Hair density estimate -- shown expanded since a printed report has no toggle to click */}
               <ExperimentalDensity estimate={a?.density_estimate} testId="report-density" defaultOpen />
