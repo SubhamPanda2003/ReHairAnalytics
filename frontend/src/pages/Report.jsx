@@ -9,6 +9,7 @@ import { LineChart, Line, ResponsiveContainer, XAxis, YAxis, Tooltip, CartesianG
 import { Download, Activity, Loader2 } from "lucide-react";
 import MetricDelta from "@/components/MetricDelta";
 import ChangeMaps from "@/components/ChangeMaps";
+import ExperimentalDensity from "@/components/ExperimentalDensity";
 
 const fetchProgress = async () => (await api.get("/progress")).data;
 const fetchTimeline = async () => (await api.get("/timeline")).data;
@@ -138,6 +139,9 @@ export default function Report() {
 
               {/* Visual change map */}
               <ChangeMaps sessionId={latestSession?.id} testId="report-change-maps" />
+
+              {/* Hair density estimate -- shown expanded since a printed report has no toggle to click */}
+              <ExperimentalDensity estimate={a?.density_estimate} testId="report-density" defaultOpen />
 
               {/* Trend */}
               {points.length > 1 && (

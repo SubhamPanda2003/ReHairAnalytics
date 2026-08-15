@@ -4,10 +4,11 @@ import { FlaskConical, ChevronDown, ChevronUp } from "lucide-react";
 const REGION_LABELS = { front: "front", left: "left", right: "right", crown: "crown", hairline: "hairline", back: "back", top: "top" };
 
 /**
- * Opt-in, collapsed-by-default hairs/cm^2 reading. Kept out of the printable
- * Report and off by default in Results so an unvalidated number never reads
- * as an official measurement -- the user has to explicitly ask to see it,
- * and every render restates that it's a guess.
+ * Opt-in hairs/cm^2 reading, collapsed by default in Results so an
+ * unvalidated number never reads as an official measurement -- the user has
+ * to explicitly ask to see it, and every render restates that it's a guess.
+ * Report passes defaultOpen so it appears expanded there (a printed/
+ * downloaded report has no way to click a toggle).
  *
  * This is a direct LLM visual guess (see ai_service.estimate_density_llm),
  * computed ONCE per scan at analysis time and stored on the analysis
@@ -15,8 +16,8 @@ const REGION_LABELS = { front: "front", left: "left", right: "right", crown: "cr
  * from data the page already fetched. Expanding this panel does not call
  * the API or the LLM; there's nothing left to fetch here.
  */
-export default function ExperimentalDensity({ estimate, testId = "experimental-density" }) {
-  const [open, setOpen] = useState(false);
+export default function ExperimentalDensity({ estimate, testId = "experimental-density", defaultOpen = false }) {
+  const [open, setOpen] = useState(defaultOpen);
 
   if (estimate === undefined) return null;
 
