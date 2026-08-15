@@ -24,6 +24,7 @@ const steps = [
   { n: "02", t: "Capture your baseline", d: "Upload front, top, left, right & back scalp photos." },
   { n: "03", t: "Track weekly", d: "Re-shoot each week using the alignment guide." },
   { n: "04", t: "Watch the trend", d: "Compare against baseline and read your AI summary." },
+  { n: "05", t: "Consult a dermatologist", d: "When you're ready, book a real consultation and bring your trend with you." },
 ];
 
 export default function Landing() {
@@ -77,7 +78,7 @@ export default function Landing() {
               Track your hair.<br /><span className="text-primary">Measure</span> your progress.
             </h1>
             <p className="mt-6 text-base md:text-lg text-muted-foreground max-w-xl leading-relaxed">
-              Turn your hair-loss journey into measurable progress with standardized photos, longitudinal tracking, and dermatologist-ready reports.
+              Turn your hair-loss journey into measurable progress with standardized photos and longitudinal tracking — then bring your trend to a real dermatologist when you're ready to act on it.
             </p>
             <div className="mt-8 flex flex-wrap items-center gap-3">
               <Button size="lg" onClick={login} data-testid="hero-cta-btn" className="rounded-full h-12 px-7 text-base">
@@ -183,12 +184,49 @@ export default function Landing() {
         </div>
       </section>
 
+      {/* Track + Consult */}
+      <section className="max-w-7xl mx-auto px-5 md:px-8 py-20">
+        <div className="text-center max-w-2xl mx-auto mb-12">
+          <div className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full bg-accent text-accent-foreground text-xs font-semibold mb-4">
+            <Stethoscope className="w-3.5 h-3.5" /> Beyond tracking
+          </div>
+          <h2 className="font-heading text-2xl sm:text-3xl lg:text-4xl font-semibold tracking-tight mb-3">A trend on its own doesn't treat hair loss.</h2>
+          <p className="text-muted-foreground leading-relaxed">
+            ReHairAnalytics doesn't stop at a chart. Once you have a real trend, bring it into a real conversation — book a dermatologist directly in the app and walk in with evidence, not just a feeling that something's changed.
+          </p>
+        </div>
+        <div className="grid sm:grid-cols-2 gap-6 max-w-3xl mx-auto">
+          <motion.div initial={{ opacity: 0, y: 16 }} whileInView={{ opacity: 1, y: 0 }} viewport={{ once: true }}
+            className="rounded-2xl border border-border bg-card p-6">
+            <div className="flex items-center gap-2 mb-4 text-primary font-semibold text-sm">
+              <LineChart className="w-4 h-4" /> 1. Track
+            </div>
+            <ul className="text-xs text-muted-foreground space-y-1.5">
+              <li>Weekly standardized scans</li>
+              <li>Objective density, coverage & hairline scores</li>
+              <li>A trend you can actually trust</li>
+            </ul>
+          </motion.div>
+          <motion.div initial={{ opacity: 0, y: 16 }} whileInView={{ opacity: 1, y: 0 }} viewport={{ once: true }} transition={{ delay: 0.08 }}
+            className="rounded-2xl border border-primary/30 bg-card p-6">
+            <div className="flex items-center gap-2 mb-4 text-primary font-semibold text-sm">
+              <Stethoscope className="w-4 h-4" /> 2. Consult
+            </div>
+            <ul className="text-xs text-muted-foreground space-y-1.5">
+              <li>Browse admin-verified dermatologists</li>
+              <li>Book a consultation in a few taps</li>
+              <li>Bring your tracked history to the conversation</li>
+            </ul>
+          </motion.div>
+        </div>
+      </section>
+
       {/* How it works */}
       <section className="bg-secondary/50 border-y border-border">
         <div className="max-w-7xl mx-auto px-5 md:px-8 py-20">
           <div className="flex items-center gap-2 mb-3"><Clock className="w-5 h-5 text-primary" /><span className="text-xs uppercase tracking-[0.2em] font-semibold text-muted-foreground">How it works</span></div>
-          <h2 className="font-heading text-2xl sm:text-3xl lg:text-4xl font-semibold tracking-tight mb-12">Four steps to a clear trend</h2>
-          <div className="grid md:grid-cols-4 gap-6">
+          <h2 className="font-heading text-2xl sm:text-3xl lg:text-4xl font-semibold tracking-tight mb-12">Five steps, from first photo to expert opinion</h2>
+          <div className="grid sm:grid-cols-2 lg:grid-cols-5 gap-6">
             {steps.map((s) => (
               <div key={s.n} className="rounded-2xl bg-card border border-border p-6">
                 <span className="font-heading text-3xl font-bold text-primary/40">{s.n}</span>
