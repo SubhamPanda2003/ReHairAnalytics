@@ -213,7 +213,7 @@ export default function Landing() {
               <Stethoscope className="w-4 h-4" /> 2. Consult
             </div>
             <ul className="text-xs text-muted-foreground space-y-1.5">
-              <li>Browse admin-verified dermatologists</li>
+              <li>Browse trusted, vetted dermatologists</li>
               <li>Book a consultation in a few taps</li>
               <li>Bring your tracked history to the conversation</li>
             </ul>
