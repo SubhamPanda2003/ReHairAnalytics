@@ -3,6 +3,7 @@ import { useNavigate } from "react-router-dom";
 import { useQuery, useQueryClient, useMutation } from "@tanstack/react-query";
 import { motion } from "framer-motion";
 import { api, fileUrl } from "@/lib/api";
+import { fmtScore } from "@/lib/scores";
 import Navbar from "@/components/Navbar";
 import { Button } from "@/components/ui/button";
 import {
@@ -100,9 +101,9 @@ export default function Timeline() {
                         <p className="text-xs text-muted-foreground">{s.region && s.region !== "full" ? `${s.region} focus · ` : ""}{s.images?.length || 0} photos</p>
                         {s.analysis ? (
                           <div className="flex gap-3 mt-1.5 text-xs">
-                            <span>Density <b>{s.analysis.density_score}</b></span>
-                            <span>Coverage <b>{s.analysis.coverage_score}</b></span>
-                            <span>Overall <b>{s.analysis.overall_score}</b></span>
+                            <span>Density <b>{fmtScore(s.analysis.density_score)}</b></span>
+                            <span>Coverage <b>{fmtScore(s.analysis.coverage_score)}</b></span>
+                            <span>Overall <b>{fmtScore(s.analysis.overall_score)}</b></span>
                           </div>
                         ) : <p className="text-xs text-muted-foreground mt-1.5">Not analyzed</p>}
                       </div>

@@ -8,8 +8,12 @@ import { Minus, TrendingDown, TrendingUp } from "lucide-react";
  * noise and shouldn't read as confirmed progress or regression.
  */
 export default function MetricDelta({ current, baseline, testId, emptyLabel = "This is your baseline", noiseFloor }) {
-  if (baseline === null || baseline === undefined || current === null || current === undefined) {
-    return <p className="text-[11px] text-muted-foreground mt-1.5" data-testid={testId}>{emptyLabel}</p>;
+  // -1 is the backend's "the AI call for this failed" sentinel (see
+  // LLM_FAILURE_SENTINEL) -- treat it the same as no reading, not a real
+  // value to diff against (a delta against a failed reading is meaningless).
+  const missing = (v) => v === null || v === undefined || v < 0;
+  if (missing(baseline) || missing(current)) {
+    return <p className="text-[11px] text-muted-foreground mt-1.5" data-testid={testId}>{missing(current) && !missing(baseline) ? "Analysis failed for this scan" : emptyLabel}</p>;
   }
   const delta = Math.round((current - baseline) * 10) / 10;
   const withinNoise = noiseFloor != null && Math.abs(delta) < noiseFloor;

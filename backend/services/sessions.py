@@ -12,14 +12,20 @@ from . import ai_service
 from . import storage as store
 from models.database import db
 from utils import image_utils
-from utils.constants import METRIC_KEYS, DELTA_KEYS, BLUR_QUALITY_MIN, ENSEMBLE_N, REGION_ORDER, BASELINE_BLEND_N
+from utils.constants import (
+    METRIC_KEYS, DELTA_KEYS, BLUR_QUALITY_MIN, ENSEMBLE_N, REGION_ORDER, BASELINE_BLEND_N, LLM_FAILURE_SENTINEL,
+)
 
 logger = logging.getLogger(__name__)
 
 
 def _avg_hairline(frames: list[dict]):
-    """Average hairline_score across only the frames that have one; None if none do."""
-    vals = [f["hairline_score"] for f in frames if f.get("hairline_score") is not None]
+    """Average hairline_score across only the frames that have a REAL one --
+    excludes both None (hairline not applicable to that frame's region, e.g.
+    crown/back) and LLM_FAILURE_SENTINEL (hairline WAS expected but the call
+    failed) -- those are different things, but neither is a number to average
+    in. Returns None if no frame has a real reading."""
+    vals = [v for v in (f.get("hairline_score") for f in frames) if v is not None and v != LLM_FAILURE_SENTINEL]
     return int(round(sum(vals) / len(vals))) if vals else None
 
 
@@ -28,6 +34,15 @@ def _median(vals: list):
         return None
     s = sorted(vals)
     return s[len(s) // 2]
+
+
+def _avg_real(frames: list[dict], key: str) -> int:
+    """Average `key` across frames, skipping LLM_FAILURE_SENTINEL entries so
+    one failed call doesn't drag a real average toward a fabricated-looking
+    number. Returns LLM_FAILURE_SENTINEL itself if every frame failed for
+    this key -- an honest "no data", not a fake one."""
+    vals = [v for v in (f.get(key, LLM_FAILURE_SENTINEL) for f in frames) if v != LLM_FAILURE_SENTINEL]
+    return int(round(sum(vals) / len(vals))) if vals else LLM_FAILURE_SENTINEL
 
 
 async def ensemble_score(b64: str, view: str, region: str, session_id: str, first_call: dict) -> tuple[dict, Optional[int]]:
@@ -55,15 +70,27 @@ async def ensemble_score(b64: str, view: str, region: str, session_id: str, firs
             e = dict(e)
             e["quality_score"] = e.pop("quality", e.get("quality_score", 0))
             samples.append(e)
-    if len(samples) < 2:
-        return first_call, None
 
-    merged = dict(first_call)
+    # A sample whose overall_score is the failure sentinel means that whole
+    # re-read failed -- drop it rather than blending a known-bad reading into
+    # the median/spread alongside real ones. If the very first read is what
+    # failed but a re-read succeeded, this also lets a real sample win instead
+    # of permanently locking in the failure.
+    real_samples = [s for s in samples if s.get("overall_score") != LLM_FAILURE_SENTINEL]
+    if len(real_samples) < 2:
+        return (real_samples[0] if real_samples else first_call), None
+
+    merged = dict(real_samples[0])
     for key in METRIC_KEYS:
-        merged[key] = _median([s.get(key, 0) for s in samples])
-    merged["hairline_score"] = _median([s["hairline_score"] for s in samples if s.get("hairline_score") is not None])
+        vals = [v for v in (s.get(key, LLM_FAILURE_SENTINEL) for s in real_samples) if v != LLM_FAILURE_SENTINEL]
+        merged[key] = _median(vals) if vals else LLM_FAILURE_SENTINEL
+    if first_call.get("hairline_score") is None:
+        merged["hairline_score"] = None  # not applicable to this region at all
+    else:
+        hairline_vals = [s["hairline_score"] for s in real_samples if s.get("hairline_score") not in (None, LLM_FAILURE_SENTINEL)]
+        merged["hairline_score"] = _median(hairline_vals) if hairline_vals else LLM_FAILURE_SENTINEL
 
-    overall_vals = [s.get("overall_score", 0) for s in samples]
+    overall_vals = [s.get("overall_score", 0) for s in real_samples]
     spread = max(overall_vals) - min(overall_vals)
     return merged, spread
 
@@ -246,10 +273,10 @@ async def _blended_baseline(all_sessions: list[dict]) -> Optional[dict]:
 
     blended = dict(docs[0])
     for key in _BLEND_KEYS:
-        vals = [d[key] for d in docs if d.get(key) is not None]
+        vals = [d[key] for d in docs if d.get(key) is not None and d.get(key) != LLM_FAILURE_SENTINEL]
         if vals:
             blended[key] = int(round(sum(vals) / len(vals)))
-    hairline_vals = [d["hairline_score"] for d in docs if d.get("hairline_score") is not None]
+    hairline_vals = [d["hairline_score"] for d in docs if d.get("hairline_score") is not None and d.get("hairline_score") != LLM_FAILURE_SENTINEL]
     blended["hairline_score"] = int(round(sum(hairline_vals) / len(hairline_vals))) if hairline_vals else None
     blended["blended_from_sessions"] = len(docs)
     return blended
@@ -319,7 +346,9 @@ def compute_deltas(current: dict, reference: Optional[dict]) -> Optional[dict]:
 
     def d(key: str):
         c, r = current.get(key), reference.get(key)
-        return round(c - r, 1) if c is not None and r is not None else None
+        if c is None or r is None or c == LLM_FAILURE_SENTINEL or r == LLM_FAILURE_SENTINEL:
+            return None
+        return round(c - r, 1)
 
     return {
         "density": d("density_score"),
@@ -423,7 +452,15 @@ async def finalize_day_analysis(user: dict, session_id: str, region: str, precis
     ).to_list(300)
     if not frames:
         raise HTTPException(status_code=400, detail="No analyzable frames")
-    usable = [f for f in frames if f.get("quality_score", 0) >= BLUR_QUALITY_MIN] or frames
+    # A quality_score of LLM_FAILURE_SENTINEL means the quality CHECK failed --
+    # that's not the same as a genuinely blurry photo, and must not be dropped
+    # here the same way: a real frame quietly disappearing from its region
+    # (rather than showing up with a visible failed reading) is exactly the
+    # "hide the failure" problem this sentinel exists to avoid.
+    usable = [
+        f for f in frames
+        if f.get("quality_score", 0) >= BLUR_QUALITY_MIN or f.get("quality_score") == LLM_FAILURE_SENTINEL
+    ] or frames
 
     # Group usable frames by their captured (sub-)region.
     by_region: dict[str, list[dict]] = {}
@@ -439,15 +476,17 @@ async def finalize_day_analysis(user: dict, session_id: str, region: str, precis
         only = sorted(only, key=lambda x: x.get("confidence", 0), reverse=True)
         topn = only[: min(4, len(only))]
         reg_key = list(by_region.keys())[0] if by_region else region
-        reg_metrics = {k: int(round(sum(f.get(k, 0) for f in topn) / len(topn))) for k in METRIC_KEYS}
+        reg_metrics = {k: _avg_real(topn, k) for k in METRIC_KEYS}
         hairline = _avg_hairline(topn)
         if hairline is not None:
             reg_metrics["hairline_score"] = hairline
         # No extra LLM calls here (already-blended frames are its own noise-reduction
         # step) -- but the spread across the frames captured this session is a free,
-        # real signal, so use it instead of re-analyzing.
-        if len(topn) >= 2:
-            overall_vals = [f.get("overall_score", 0) for f in topn]
+        # real signal, so use it instead of re-analyzing. Only across frames that
+        # actually produced a real overall_score -- a failed read isn't "spread",
+        # it's missing data, and would otherwise inflate the spread artificially.
+        overall_vals = [v for v in (f.get("overall_score", 0) for f in topn) if v != LLM_FAILURE_SENTINEL]
+        if len(overall_vals) >= 2:
             reg_metrics["spread"] = max(overall_vals) - min(overall_vals)
             region_spreads.append(reg_metrics["spread"])
         region_storage_path[reg_key] = topn[0]["storage_path"]
@@ -472,7 +511,7 @@ async def finalize_day_analysis(user: dict, session_id: str, region: str, precis
             per_region[reg] = reg_metrics
 
     def avg(key: str) -> int:
-        return int(round(sum(f.get(key, 0) for f in topn) / len(topn)))
+        return _avg_real(topn, key)
 
     # Empirical, per-scan noise floor: how much would this session's own overall_score
     # plausibly wobble on a re-read. None (not 0) when we have no basis to estimate it,

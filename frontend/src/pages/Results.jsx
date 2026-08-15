@@ -3,6 +3,7 @@ import { useParams, useNavigate } from "react-router-dom";
 import { useQuery, useQueryClient, useMutation } from "@tanstack/react-query";
 import { motion } from "framer-motion";
 import { api, fileUrl } from "@/lib/api";
+import { fmtScore, hasScore } from "@/lib/scores";
 import Navbar from "@/components/Navbar";
 import ScoreRing from "@/components/ScoreRing";
 import MetricDelta from "@/components/MetricDelta";
@@ -20,7 +21,8 @@ import { ArrowLeft, Sparkles, TrendingUp, TrendingDown, Minus, Loader2, FileText
 const fetchSession = async (id) => (await api.get(`/sessions/${id}`)).data;
 
 const Delta = ({ label, cur, ref, noiseFloor }) => {
-  if (cur === null || cur === undefined || ref === null || ref === undefined) return null;
+  // -1 is the backend's "AI call failed" sentinel -- a delta against it is meaningless.
+  if (!hasScore(cur) || !hasScore(ref)) return null;
   const d = Math.round((cur - ref) * 10) / 10;
   const withinNoise = noiseFloor != null && Math.abs(d) < noiseFloor;
   const Icon = withinNoise ? Minus : d > 0 ? TrendingUp : d < 0 ? TrendingDown : Minus;
@@ -140,7 +142,7 @@ export default function Results() {
                   <ScoreRing value={a.hairline_score} label="Hairline" color="hsl(var(--chart-3))" testId="ring-hairline" />
                   <MetricDelta
                     current={a.hairline_score} baseline={s.baseline_analysis?.hairline_score} testId="delta-hairline"
-                    emptyLabel={a.hairline_score == null ? "No hairline reading this scan" : "This is your baseline"}
+                    emptyLabel={a.hairline_score == null ? "No hairline reading this scan" : !hasScore(a.hairline_score) ? "Hairline analysis failed this scan" : "This is your baseline"}
                     noiseFloor={noiseFloor}
                   />
                 </div>
@@ -150,9 +152,9 @@ export default function Results() {
                 </div>
               </div>
               <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 mt-8 text-center">
-                <div><p className="text-xs uppercase tracking-[0.15em] text-muted-foreground">Image quality</p><p className="font-heading text-2xl font-bold">{a.quality_score}</p></div>
-                <div><p className="text-xs uppercase tracking-[0.15em] text-muted-foreground">Confidence</p><p className="font-heading text-2xl font-bold">{a.confidence}%</p></div>
-                <div><p className="text-xs uppercase tracking-[0.15em] text-muted-foreground">Visible scalp</p><p className="font-heading text-2xl font-bold">{a.visible_scalp_pct}%</p></div>
+                <div><p className="text-xs uppercase tracking-[0.15em] text-muted-foreground">Image quality</p><p className="font-heading text-2xl font-bold">{fmtScore(a.quality_score)}</p></div>
+                <div><p className="text-xs uppercase tracking-[0.15em] text-muted-foreground">Confidence</p><p className="font-heading text-2xl font-bold">{fmtScore(a.confidence, "%")}</p></div>
+                <div><p className="text-xs uppercase tracking-[0.15em] text-muted-foreground">Visible scalp</p><p className="font-heading text-2xl font-bold">{fmtScore(a.visible_scalp_pct, "%")}</p></div>
                 <div data-testid="measurement-spread">
                   <p className="text-xs uppercase tracking-[0.15em] text-muted-foreground">Reading precision</p>
                   <p className="font-heading text-2xl font-bold">±{noiseFloor}</p>
@@ -171,10 +173,10 @@ export default function Results() {
                     <div key={reg} className="rounded-2xl border border-border p-4" data-testid={`region-metric-${reg}`}>
                       <p className="capitalize font-heading font-semibold">{reg}</p>
                       <div className="text-xs text-muted-foreground mt-2 space-y-1.5">
-                        <div className="flex justify-between">Density <b className="text-foreground">{m.density_score}</b></div>
-                        <div className="flex justify-between">Coverage <b className="text-foreground">{m.coverage_score}</b></div>
+                        <div className="flex justify-between">Density <b className="text-foreground">{fmtScore(m.density_score)}</b></div>
+                        <div className="flex justify-between">Coverage <b className="text-foreground">{fmtScore(m.coverage_score)}</b></div>
                         {m.hairline_score !== undefined ? (
-                          <div className="flex justify-between">Hairline <b className="text-foreground">{m.hairline_score}</b></div>
+                          <div className="flex justify-between">Hairline <b className="text-foreground">{fmtScore(m.hairline_score)}</b></div>
                         ) : (
                           <p className="italic text-muted-foreground/70">No hairline reading — not visible from this angle</p>
                         )}
@@ -261,7 +263,7 @@ export default function Results() {
                     >
                       <Trash2 className="w-3.5 h-3.5" />
                     </button>
-                    <p className="text-xs text-center py-1.5 capitalize text-muted-foreground">{img.view} · Q{img.quality_score}</p>
+                    <p className="text-xs text-center py-1.5 capitalize text-muted-foreground">{img.view} · Q{fmtScore(img.quality_score)}</p>
                   </div>
                 ))}
               </div>

@@ -4,7 +4,7 @@ import re
 import logging
 from dotenv import load_dotenv
 from emergentintegrations.llm.chat import LlmChat, UserMessage, ImageContent
-from utils.constants import MODEL, MEASUREMENT_TEMPERATURE, REGION_FOCUS, HAIRLINE_VISIBLE_REGIONS
+from utils.constants import MODEL, MEASUREMENT_TEMPERATURE, REGION_FOCUS, HAIRLINE_VISIBLE_REGIONS, LLM_FAILURE_SENTINEL
 
 load_dotenv()
 logger = logging.getLogger(__name__)
@@ -126,26 +126,33 @@ async def analyze_metrics(image_b64: str, view: str, session_id: str, region: st
         msg = UserMessage(text=prompt, file_contents=[ImageContent(image_base64=image_b64)])
         resp = await chat.send_message(msg)
         data = _extract_json(resp)
-        density = _clamp(data.get("density_score"), default=65)
-        coverage = _clamp(data.get("coverage_score"), default=68)
-        hairline = _clamp(data.get("hairline_score"), default=70) if include_hairline else None
-        blend = [density, coverage] + ([hairline] if include_hairline else [])
-        overall = _clamp(data.get("overall_score"), default=int(sum(blend) / len(blend)))
+        density = _clamp(data.get("density_score"), default=LLM_FAILURE_SENTINEL)
+        coverage = _clamp(data.get("coverage_score"), default=LLM_FAILURE_SENTINEL)
+        hairline = _clamp(data.get("hairline_score"), default=LLM_FAILURE_SENTINEL) if include_hairline else None
+        # overall_score falls back to a blend of this call's OWN other scores
+        # when the model omits it -- but only the ones that are themselves
+        # real; a blend that includes a failed field would just be a
+        # differently-shaped fabricated number.
+        real_blend = [v for v in [density, coverage] + ([hairline] if include_hairline else []) if v != LLM_FAILURE_SENTINEL]
+        overall_default = int(sum(real_blend) / len(real_blend)) if real_blend else LLM_FAILURE_SENTINEL
+        overall = _clamp(data.get("overall_score"), default=overall_default)
         return {
             "hairline_score": hairline,
             "density_score": density,
             "coverage_score": coverage,
             "overall_score": overall,
-            "confidence": _clamp(data.get("confidence"), default=80),
-            "quality": _clamp(data.get("quality"), default=75),
-            "visible_scalp_pct": _clamp(data.get("visible_scalp_pct"), default=max(0, 100 - coverage)),
+            "confidence": _clamp(data.get("confidence"), default=LLM_FAILURE_SENTINEL),
+            "quality": _clamp(data.get("quality"), default=LLM_FAILURE_SENTINEL),
+            "visible_scalp_pct": _clamp(data.get("visible_scalp_pct"), default=(100 - coverage) if coverage != LLM_FAILURE_SENTINEL else LLM_FAILURE_SENTINEL),
             "hair_coverage_pct": _clamp(data.get("hair_coverage_pct"), default=coverage),
         }
     except Exception as e:
         logger.error(f"analyze_metrics failed: {e}")
         return {
-            "hairline_score": 70 if include_hairline else None, "density_score": 65, "coverage_score": 68,
-            "overall_score": 68, "confidence": 75, "quality": 72, "visible_scalp_pct": 32, "hair_coverage_pct": 68,
+            "hairline_score": LLM_FAILURE_SENTINEL if include_hairline else None,
+            "density_score": LLM_FAILURE_SENTINEL, "coverage_score": LLM_FAILURE_SENTINEL,
+            "overall_score": LLM_FAILURE_SENTINEL, "confidence": LLM_FAILURE_SENTINEL,
+            "quality": LLM_FAILURE_SENTINEL, "visible_scalp_pct": LLM_FAILURE_SENTINEL, "hair_coverage_pct": LLM_FAILURE_SENTINEL,
         }
 
 

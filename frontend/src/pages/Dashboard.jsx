@@ -3,6 +3,7 @@ import { useNavigate } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { motion } from "framer-motion";
 import { api, fileUrl } from "@/lib/api";
+import { fmtScore } from "@/lib/scores";
 import { useAuth } from "@/context/AuthContext";
 import Navbar from "@/components/Navbar";
 import { Button } from "@/components/ui/button";
@@ -159,7 +160,7 @@ export default function Dashboard() {
                     {s.images?.[0] ? <img src={fileUrl(s.images[0].thumb_path)} alt="" className="w-full h-24 object-cover" /> : <div className="w-full h-24 bg-muted" />}
                     <div className="p-3">
                       <p className="font-heading font-semibold">{new Date(s.date).toLocaleDateString(undefined, { month: "short", day: "numeric" })}</p>
-                      <p className="text-xs text-muted-foreground">{s.analysis ? `Overall ${s.analysis.overall_score}` : "Not analyzed"}</p>
+                      <p className="text-xs text-muted-foreground">{s.analysis ? `Overall ${fmtScore(s.analysis.overall_score)}` : "Not analyzed"}</p>
                     </div>
                   </button>
                 ))}

@@ -34,6 +34,16 @@ REGION_FOCUS = {
 HAIRLINE_VISIBLE_REGIONS = {"full", "front", "hairline", "left", "right"}
 
 
+# Marks a score field the LLM call couldn't actually produce (call raised, or
+# the response had no usable value for that field) -- distinct from a real
+# score AND from None ("not applicable to this region", e.g. hairline_score
+# off a crown photo). Deliberately outside the valid 0-100 range so it can
+# never be mistaken for a real reading, but still a plain int so it flows
+# through existing max()/sort()/sum() call sites without crashing -- it just
+# sorts/averages as the worst possible value, which is the correct behavior
+# (real data should always be preferred over a known-failed reading).
+LLM_FAILURE_SENTINEL = -1
+
 # --- Scoring / ensembling (services/sessions.py) ---
 
 # hairline_score is handled separately from the other metrics: it's only ever

@@ -1,7 +1,10 @@
 import React from "react";
 
 export default function ScoreRing({ value = 0, size = 120, stroke = 10, label, color = "hsl(var(--chart-1))", testId }) {
-  const hasValue = value !== null && value !== undefined;
+  // -1 is the backend's "the AI call for this failed" sentinel (see
+  // LLM_FAILURE_SENTINEL) -- render it the same as no reading at all rather
+  // than a confusing negative score.
+  const hasValue = value !== null && value !== undefined && value >= 0;
   const radius = (size - stroke) / 2;
   const circ = 2 * Math.PI * radius;
   const offset = circ - (hasValue ? Math.max(0, Math.min(100, value)) / 100 : 0) * circ;

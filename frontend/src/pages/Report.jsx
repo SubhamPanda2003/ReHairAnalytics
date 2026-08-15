@@ -2,6 +2,7 @@ import React from "react";
 import { useNavigate } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { api, fileUrl } from "@/lib/api";
+import { fmtScore, hasScore } from "@/lib/scores";
 import { useAuth } from "@/context/AuthContext";
 import Navbar from "@/components/Navbar";
 import { Button } from "@/components/ui/button";
@@ -15,7 +16,7 @@ import ScalpMap from "@/components/ScalpMap";
 const fetchProgress = async () => (await api.get("/progress")).data;
 const fetchTimeline = async () => (await api.get("/timeline")).data;
 
-const confidenceLabel = (c) => (c === null || c === undefined ? null : c >= 80 ? "High" : c >= 60 ? "Moderate" : "Low");
+const confidenceLabel = (c) => (!hasScore(c) ? null : c >= 80 ? "High" : c >= 60 ? "Moderate" : "Low");
 
 // Auto-scan frames carry a `region` (front/left/right/crown/hairline/back); manual uploads
 // carry a `view` (front/top/left/right/back) instead. Either way, group by whichever is present.
@@ -102,7 +103,7 @@ export default function Report() {
                 ].map(([label, val, base]) => (
                   <div key={label} className="rounded-2xl border border-border p-4">
                     <p className="text-xs uppercase tracking-[0.15em] text-muted-foreground">{label}</p>
-                    <p className="font-heading text-3xl font-bold">{val ?? "—"}</p>
+                    <p className="font-heading text-3xl font-bold">{fmtScore(val)}</p>
                     <MetricDelta current={val} baseline={base} testId={`report-delta-${label.toLowerCase()}`} noiseFloor={progress?.noise_floor} />
                   </div>
                 ))}
@@ -117,9 +118,9 @@ export default function Report() {
               {a && (
                 <div className="rounded-2xl border border-border p-4 mb-8 flex flex-wrap items-center gap-x-6 gap-y-1.5 text-xs" data-testid="report-measurement-quality">
                   <span className="text-muted-foreground uppercase tracking-[0.1em] font-semibold">Measurement quality</span>
-                  <span>Confidence <b className="text-foreground">{a.confidence}%</b>{confidenceLabel(a.confidence) && <span className="text-muted-foreground"> ({confidenceLabel(a.confidence)})</span>}</span>
-                  <span>Photo quality <b className="text-foreground">{a.quality_score}</b></span>
-                  <span>Visible scalp <b className="text-foreground">{a.visible_scalp_pct}%</b></span>
+                  <span>Confidence <b className="text-foreground">{fmtScore(a.confidence, "%")}</b>{confidenceLabel(a.confidence) && <span className="text-muted-foreground"> ({confidenceLabel(a.confidence)})</span>}</span>
+                  <span>Photo quality <b className="text-foreground">{fmtScore(a.quality_score)}</b></span>
+                  <span>Visible scalp <b className="text-foreground">{fmtScore(a.visible_scalp_pct, "%")}</b></span>
                 </div>
               )}
 
@@ -185,7 +186,7 @@ export default function Report() {
                               {new Date(s.date).toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" })}
                               <span className="text-muted-foreground font-normal"> · {new Date(s.date).toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" })}</span>
                             </p>
-                            <p className="text-xs text-muted-foreground">{s.analysis ? <>Overall <b className="text-foreground">{s.analysis.overall_score}</b></> : "Not analyzed"}</p>
+                            <p className="text-xs text-muted-foreground">{s.analysis ? <>Overall <b className="text-foreground">{fmtScore(s.analysis.overall_score)}</b></> : "Not analyzed"}</p>
                           </div>
                           {regionPhotos.length === 0 ? (
                             <p className="text-xs text-muted-foreground">No photos</p>
