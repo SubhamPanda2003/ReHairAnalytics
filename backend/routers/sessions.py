@@ -91,7 +91,7 @@ async def auto_scan(
     files: List[UploadFile] = File(...),
     region: str = Form("full"),
     frame_regions: List[str] = Form([]),
-    precision: bool = Form(True),
+    precision: bool = Form(False),
 ):
     if region not in ("full", "crown", "hairline"):
         region = "full"

@@ -15,8 +15,9 @@ export default function UploadPage() {
   const navigate = useNavigate();
   const [mode, setMode] = useState("auto");
   // Re-checks each region's reading a couple extra times and blends them,
-  // trading scan time for steadier scores. Sent to /scan as "precision".
-  const [precision, setPrecision] = useState(true);
+  // trading scan time for steadier scores. Off by default (faster scan);
+  // user opts in. Sent to /scan as "precision".
+  const [precision, setPrecision] = useState(false);
 
   // Manual mode: per-region burst capture, accumulated client-side until one
   // final /scan submission covering every captured region.

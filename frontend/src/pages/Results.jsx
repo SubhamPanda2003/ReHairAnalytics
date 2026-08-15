@@ -8,6 +8,7 @@ import ScoreRing from "@/components/ScoreRing";
 import MetricDelta from "@/components/MetricDelta";
 import ChangeMaps from "@/components/ChangeMaps";
 import ExperimentalDensity from "@/components/ExperimentalDensity";
+import ScalpMap from "@/components/ScalpMap";
 import { Button } from "@/components/ui/button";
 import {
   AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription,
@@ -167,6 +168,9 @@ export default function Results() {
                 </div>
               </motion.div>
             )}
+
+            {/* Scalp visibility map (color-based patch highlight, per region) */}
+            <ScalpMap perRegion={a.per_region} testId="scalp-map" />
 
             {/* AI summary */}
             <motion.div initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.1 }}

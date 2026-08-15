@@ -359,7 +359,26 @@ async def _compute_density_estimate(images: list[dict], session_id: str) -> Opti
     return result
 
 
-async def finalize_day_analysis(user: dict, session_id: str, region: str, precision: bool = True) -> dict:
+async def _generate_scalp_map(storage_path: str, user_id: str, session_id: str, region: str) -> Optional[str]:
+    """Color-based visual highlight of scalp-colored patches in one region's
+    representative photo (see image_utils.mark_scalp_patches) -- a visual aid,
+    not a measurement. Returns the stored overlay image's path, or None if the
+    source photo can't be loaded or processed; never blocks the rest of the
+    scan's analysis from saving.
+    """
+    try:
+        data, _ = await asyncio.to_thread(store.get_object, storage_path)
+        overlay = await asyncio.to_thread(image_utils.mark_scalp_patches, data)
+    except Exception:
+        return None
+    if overlay is None:
+        return None
+    path = f"{store.APP_NAME}/scalpmaps/{user_id}/{session_id}-{region}.jpg"
+    await asyncio.to_thread(store.put_object, path, overlay, "image/jpeg")
+    return path
+
+
+async def finalize_day_analysis(user: dict, session_id: str, region: str, precision: bool = False) -> dict:
     """Aggregate every analyzed frame captured today into a single analysis
     document. `precision` gates the ensemble re-analysis step below (see
     _ensemble_frame/ensemble_score) -- on, each region's winning frame gets
@@ -398,6 +417,7 @@ async def finalize_day_analysis(user: dict, session_id: str, region: str, precis
             overall_vals = [f.get("overall_score", 0) for f in topn]
             reg_metrics["spread"] = max(overall_vals) - min(overall_vals)
             region_spreads.append(reg_metrics["spread"])
+        reg_metrics["scalp_map_path"] = await _generate_scalp_map(topn[0]["storage_path"], user["user_id"], session_id, reg_key)
         per_region[reg_key] = reg_metrics
     else:
         # Full scan: pick the single best-confidence frame per region, ensemble-reanalyze
@@ -413,6 +433,7 @@ async def finalize_day_analysis(user: dict, session_id: str, region: str, precis
             if spread is not None:
                 reg_metrics["spread"] = spread
                 region_spreads.append(spread)
+            reg_metrics["scalp_map_path"] = await _generate_scalp_map(best["storage_path"], user["user_id"], session_id, reg)
             per_region[reg] = reg_metrics
 
     def avg(key: str) -> int:

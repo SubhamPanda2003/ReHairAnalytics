@@ -148,3 +148,54 @@ def framing_consistency(baseline_bytes: bytes, current_bytes: bytes) -> dict:
     Returns {"aligned": bool, "match_count": int, "scale_shift_pct": float|None}."""
     cmp = compare_photos(baseline_bytes, current_bytes)
     return {"aligned": cmp["aligned"], "match_count": cmp["match_count"], "scale_shift_pct": cmp["scale_shift_pct"]}
+
+
+def mark_scalp_patches(image_bytes: bytes, max_dim: int = 800) -> "bytes | None":
+    """Highlight areas of a hair/scalp photo that color-clustering identifies as
+    scalp-colored rather than hair-colored, tinted red. Purely a visual aid for
+    spotting where scalp shows through -- like the change-map heatmap, this
+    marks visible pixel color, not a hair count or clinical assessment.
+
+    K-means (k=3: hair / scalp-skin / other) same as the density estimate used
+    to use, treating the darkest cluster as "hair" -- true for most hair colors
+    against scalp/skin, but breaks down for gray/blonde hair on fair skin, a
+    known, unresolved limitation of this heuristic. Runs on the whole photo (no
+    face-based ROI -- that pipeline was removed), so for regions where a lot of
+    face/neck skin is in frame (mainly "front"), some of that skin can get
+    tinted too; it isn't restricted to the scalp specifically.
+
+    Returns None if the photo can't be decoded, rather than a fabricated image.
+    """
+    img = _decode_bgr(image_bytes)
+    if img is None:
+        return None
+    h, w = img.shape[:2]
+    scale = min(1.0, max_dim / max(h, w))
+    if scale < 1.0:
+        img = cv2.resize(img, (int(w * scale), int(h * scale)))
+        h, w = img.shape[:2]
+
+    pixels = img.reshape(-1, 3).astype(np.float32)
+    if len(pixels) < 50:
+        return None
+    k = 3
+    criteria = (cv2.TERM_CRITERIA_EPS + cv2.TERM_CRITERIA_MAX_ITER, 20, 0.5)
+    _, labels, centers = cv2.kmeans(pixels, k, None, criteria, 3, cv2.KMEANS_PP_CENTERS)
+    hair_cluster = int(np.argmin(centers.sum(axis=1)))
+    scalp_mask = (labels.reshape(h, w) != hair_cluster).astype(np.uint8) * 255
+
+    # Morphological open+close to clear speckle noise into coherent patches --
+    # "patches" implies contiguous areas, not a salt-and-pepper pixel scatter.
+    kernel = np.ones((5, 5), np.uint8)
+    scalp_mask = cv2.morphologyEx(scalp_mask, cv2.MORPH_OPEN, kernel)
+    scalp_mask = cv2.morphologyEx(scalp_mask, cv2.MORPH_CLOSE, kernel)
+
+    red_layer = np.zeros_like(img)
+    red_layer[:] = (0, 0, 255)  # BGR red
+    blended = cv2.addWeighted(img, 0.45, red_layer, 0.55, 0)
+    mask_bool = scalp_mask > 0
+    overlay = img.copy()
+    overlay[mask_bool] = blended[mask_bool]
+
+    ok, buf = cv2.imencode(".jpg", overlay, [cv2.IMWRITE_JPEG_QUALITY, 85])
+    return buf.tobytes() if ok else None
