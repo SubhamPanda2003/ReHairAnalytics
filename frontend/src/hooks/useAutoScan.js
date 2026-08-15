@@ -80,9 +80,11 @@ export default function useAutoScan(precision = true) {
     fd.append("region", region);
     fd.append("precision", precision ? "true" : "false");
     try {
+      // /scan hands the actual analysis off to a background job and returns
+      // right away -- Results polls the session until it's done, so there's
+      // nothing to read off this response beyond the session to navigate to.
       const res = await api.post("/scan", fd, { headers: { "Content-Type": "multipart/form-data" } });
-      const a = res.data.analysis;
-      toast.success(region === "full" ? `Analyzed best photo from ${a.frames_used} regions` : `Analyzed ${a.frames_used} of ${a.frames_analyzed} photos`);
+      toast.success("Photos captured — analyzing now.");
       navigate(`/results/${res.data.session_id}`);
     } catch (e) {
       toast.error(e.response?.data?.detail || "Scan analysis failed");

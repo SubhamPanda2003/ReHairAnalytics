@@ -14,6 +14,8 @@ import pytest
 import requests
 from pymongo import MongoClient
 
+from conftest import wait_for_analysis
+
 BASE_URL = os.environ["REACT_APP_BACKEND_URL"].rstrip("/")
 API = f"{BASE_URL}/api"
 MONGO_URL = os.environ.get("MONGO_URL", "mongodb://localhost:27017")
@@ -76,8 +78,9 @@ class TestNewFeatures:
         assert r.status_code == 200, r.text
         body = r.json()
         assert "session_id" in body
-        assert "analysis" in body
-        a = body["analysis"]
+        session_id = body["session_id"]
+        detail = wait_for_analysis(sc, API, session_id)
+        a = detail["analysis"]
         # metric ranges
         for k in ("density_score", "coverage_score", "hairline_score", "overall_score",
                   "confidence", "quality_score"):
@@ -90,12 +93,12 @@ class TestNewFeatures:
             f"used={a['frames_used']} of {a['frames_analyzed']}")
         assert isinstance(a.get("ai_summary"), str) and len(a["ai_summary"]) > 20
         # baseline scan: no previous
-        assert body.get("vs_previous") in (None,)
-        print(f"scan#1 sid={body['session_id']} density={a['density_score']} "
+        assert detail.get("previous_analysis") is None
+        print(f"scan#1 sid={session_id} density={a['density_score']} "
               f"coverage={a['coverage_score']} hairline={a['hairline_score']} "
               f"overall={a['overall_score']} conf={a['confidence']} "
               f"summary_len={len(a['ai_summary'])}")
-        type(self).session_id = body["session_id"]
+        type(self).session_id = session_id
         type(self).first_scores = (a["density_score"], a["coverage_score"], a["hairline_score"])
 
     # ---------- 2) Same-day reuse: second /scan reuses SAME session ----------
@@ -108,7 +111,7 @@ class TestNewFeatures:
         assert r.status_code == 200, r.text
         body = r.json()
         assert body["session_id"] == self.session_id, "should reuse today's session"
-        a = body["analysis"]
+        a = wait_for_analysis(sc, API, body["session_id"])["analysis"]
         # 6 previous frames + 3 new = 9
         assert a["frames_analyzed"] == 9, f"frames_analyzed={a['frames_analyzed']}"
         assert a["frames_used"] == a["frames_analyzed"], f"frames_used={a['frames_used']}"
@@ -123,7 +126,8 @@ class TestNewFeatures:
         assert r.status_code == 200, r.text
         body = r.json()
         assert body["session_id"] == self.session_id
-        assert body["analysis"]["region"] == "crown"
+        detail = wait_for_analysis(sc, API, body["session_id"])
+        assert detail["analysis"]["region"] == "crown"
         # verify session doc reflects region
         rs = sc.get(f"{API}/sessions/{self.session_id}")
         assert rs.status_code == 200
@@ -134,7 +138,8 @@ class TestNewFeatures:
         frames = [("files", ("z.jpg", _read("scan_frame_0.jpg"), "image/jpeg"))]
         r = sc.post(f"{API}/scan", files=frames, data={"region": "invalid_zone"}, timeout=180)
         assert r.status_code == 200, r.text
-        assert r.json()["analysis"]["region"] == "full"
+        detail = wait_for_analysis(sc, API, r.json()["session_id"])
+        assert detail["analysis"]["region"] == "full"
 
     # ---------- 5) Empty payload -> 400 ----------
     def test_05_scan_no_files_rejects(self, sc):

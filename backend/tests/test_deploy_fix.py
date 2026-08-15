@@ -12,12 +12,13 @@ import os
 import time
 import uuid
 import threading
-import concurrent.futures
 from datetime import datetime, timezone, timedelta
 
 import pytest
 import requests
 from pymongo import MongoClient
+
+from conftest import wait_for_analysis
 
 PUBLIC_BASE = os.environ["REACT_APP_BACKEND_URL"].rstrip("/")
 PUBLIC_API = f"{PUBLIC_BASE}/api"
@@ -117,16 +118,18 @@ class TestDeployFix:
         r = dc.post(f"{PUBLIC_API}/scan", files=frames, data={"region": "full"}, timeout=240)
         assert r.status_code == 200, r.text
         body = r.json()
-        assert "session_id" in body and "analysis" in body
-        a = body["analysis"]
+        assert "session_id" in body
+        session_id = body["session_id"]
+        detail = wait_for_analysis(dc, PUBLIC_API, session_id)
+        a = detail["analysis"]
         for k in ("density_score", "coverage_score", "hairline_score", "overall_score",
                   "confidence", "quality_score"):
             assert 0 <= a[k] <= 100, f"{k}={a[k]}"
         assert isinstance(a.get("ai_summary"), str) and len(a["ai_summary"]) > 20
         assert a["region"] == "full"
         assert a["frames_analyzed"] == 3
-        type(self).session_id = body["session_id"]
-        print(f"scan sid={body['session_id']} density={a['density_score']} "
+        type(self).session_id = session_id
+        print(f"scan sid={session_id} density={a['density_score']} "
               f"coverage={a['coverage_score']} hairline={a['hairline_score']} "
               f"overall={a['overall_score']} summary_len={len(a['ai_summary'])}")
 
@@ -180,16 +183,16 @@ class TestDeployFix:
 
     # ---------- event-loop responsiveness ----------
     def test_11_health_fast_during_scan(self, dc):
-        """While /api/scan is in flight (2 frames), poll /health locally.
-        Each poll must return 200 in <2s -> the event loop is not blocked
-        by the sync store.put_object / Pillow work (they are now to_thread'd)."""
+        """/scan now hands the storage + Pillow + AI work off to a background
+        task and returns almost immediately, so that work no longer happens
+        during the request -- it happens right after, off the response. Poll
+        /health across the POST and for a couple seconds afterward, while the
+        background task is doing that work, to confirm it still doesn't block
+        the event loop (the thing this test has always been about)."""
         frames = [
             ("files", (f"g_{i}.jpg", _read(f"scan_frame_{i}.jpg"), "image/jpeg"))
             for i in range(2)
         ]
-
-        def do_scan():
-            return dc.post(f"{PUBLIC_API}/scan", files=frames, data={"region": "full"}, timeout=240)
 
         results = []  # list of (elapsed_s, status_code)
         stop = threading.Event()
@@ -207,9 +210,8 @@ class TestDeployFix:
 
         poller = threading.Thread(target=poll_health, daemon=True)
         poller.start()
-        with concurrent.futures.ThreadPoolExecutor(max_workers=1) as ex:
-            fut = ex.submit(do_scan)
-            scan_resp = fut.result()
+        scan_resp = dc.post(f"{PUBLIC_API}/scan", files=frames, data={"region": "full"}, timeout=240)
+        time.sleep(2.0)  # give the background task's storage/Pillow/AI work a window to run while polling
         stop.set()
         poller.join(timeout=2)
 

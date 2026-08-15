@@ -53,8 +53,10 @@ export default function UploadPage() {
     fd.append("region", "full");
     fd.append("precision", precision ? "true" : "false");
     try {
+      // /scan hands the actual analysis off to a background job and returns
+      // right away -- Results polls the session until it's done.
       const res = await api.post("/scan", fd, { headers: { "Content-Type": "multipart/form-data" } });
-      toast.success(`Analyzed ${res.data.analysis.frames_used} of ${res.data.analysis.frames_analyzed} photos`);
+      toast.success("Photos captured — analyzing now.");
       navigate(`/results/${res.data.session_id}`);
     } catch (e) {
       toast.error(e.response?.data?.detail || "Analysis failed");

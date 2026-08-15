@@ -10,6 +10,8 @@ from pathlib import Path
 
 import requests
 
+from conftest import wait_for_analysis
+
 BASE = os.environ["REACT_APP_BACKEND_URL"].rstrip("/")
 API = f"{BASE}/api"
 FIX = Path("/app/backend/tests/fixtures")
@@ -29,8 +31,10 @@ def test_same_day_rescan_accumulates_regions():
     data = [("region", "crown"), ("frame_regions", "crown"), ("frame_regions", "crown")]
     r = s.post(f"{API}/scan", data=data, files=files, timeout=300)
     assert r.status_code == 200, r.text[:500]
-    a = r.json()["analysis"]
-    print("AFTER  session_id same:", r.json()["session_id"] == SEED["patient"]["session_id"])
+    scan_session_id = r.json()["session_id"]
+    detail = wait_for_analysis(s, API, scan_session_id)
+    a = detail["analysis"]
+    print("AFTER  session_id same:", scan_session_id == SEED["patient"]["session_id"])
     print("AFTER  region:", a["region"], "per_region:", list(a["per_region"].keys()),
           "frames_analyzed:", a["frames_analyzed"], "frames_used:", a["frames_used"])
     # No crash / valid payload regardless of the design decision.

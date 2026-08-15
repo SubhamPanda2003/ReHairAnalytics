@@ -1,5 +1,6 @@
 """Shared test fixtures. Seed a MongoDB user + session_token for auth."""
 import os
+import time
 import uuid
 from datetime import datetime, timezone, timedelta
 
@@ -64,3 +65,22 @@ def auth_client(seeded_user):
 @pytest.fixture(scope="session")
 def anon_client():
     return requests.Session()
+
+
+def wait_for_analysis(client, api_base, session_id, timeout=90, interval=2):
+    """POST /scan hands analysis off to a background task and returns
+    {"session_id", "status": "processing"} right away -- poll GET
+    /sessions/{id} (same contract the frontend polls) until an analysis doc
+    shows up or `timeout` seconds pass. Returns the session detail dict.
+    Raises AssertionError on timeout so a stuck/failed background job fails
+    the test loudly instead of hanging or asserting on a still-empty analysis."""
+    deadline = time.monotonic() + timeout
+    detail = None
+    while time.monotonic() < deadline:
+        detail = client.get(f"{api_base}/sessions/{session_id}", timeout=30).json()
+        if detail.get("analysis") is not None:
+            return detail
+        if not detail.get("processing"):
+            break  # background job finished (or never started) without producing an analysis
+        time.sleep(interval)
+    raise AssertionError(f"session {session_id} never finished analyzing (last state: {detail})")

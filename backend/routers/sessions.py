@@ -4,7 +4,7 @@ import uuid
 from datetime import datetime, timezone
 from typing import List
 
-from fastapi import APIRouter, File, Form, HTTPException, UploadFile
+from fastapi import APIRouter, BackgroundTasks, File, Form, HTTPException, UploadFile
 
 from utils import config, image_utils
 from models.database import db
@@ -88,68 +88,38 @@ async def get_change_maps(session_id: str, user: CurrentUser):
 @router.post("/scan")
 async def auto_scan(
     user: CurrentUser,
+    background_tasks: BackgroundTasks,
     files: List[UploadFile] = File(...),
     region: str = Form("full"),
     frame_regions: List[str] = Form([]),
     precision: bool = Form(False),
 ):
+    """Accepts the captured frames and hands the actual analysis (per-frame
+    LLM scoring, then finalize_day_analysis) off to a background task instead
+    of awaiting it here -- a full multi-region scan makes enough sequential
+    LLM calls that doing this inline was slow enough to trip the reverse
+    proxy's origin timeout. The client gets session_id back immediately and
+    polls GET /sessions/{id} (processing + analysis fields) for the result.
+    """
     if region not in ("full", "crown", "hairline"):
         region = "full"
     session = await sessions_service.get_or_create_today_session(user["user_id"])
     session_id = session["id"]
 
     regions_in = frame_regions or []
-    processed = []  # list of (proc, sub_region)
+    raw_frames: List[tuple] = []
     for i, f in enumerate(files[:36]):
         raw = await f.read()
         if not raw or len(raw) > config.MAX_UPLOAD_SIZE:
             continue
         sub = regions_in[i] if i < len(regions_in) else region
-        try:
-            proc, _ = await asyncio.to_thread(image_utils.process_image, raw)
-            processed.append((proc, sub))
-        except Exception:
-            continue
-    if not processed:
+        raw_frames.append((raw, sub))
+    if not raw_frames:
         raise HTTPException(status_code=400, detail="No valid frames captured")
 
-    sem = asyncio.Semaphore(6)
-
-    async def analyze_one(i, proc, sub):
-        async with sem:
-            b64 = await asyncio.to_thread(image_utils.to_base64_jpeg, proc)
-            m = await ai_service.analyze_metrics(b64, "scan", f"{session_id}-{i}", region=sub)
-        return proc, sub, m
-
-    results = await asyncio.gather(*[analyze_one(i, p, sub) for i, (p, sub) in enumerate(processed)])
-
-    for proc, sub, m in results:
-        img_id = str(uuid.uuid4())
-        base = f"{store.APP_NAME}/uploads/{user['user_id']}/{img_id}"
-        r1 = await asyncio.to_thread(store.put_object, f"{base}.jpg", proc, "image/jpeg")
-        thumb = await asyncio.to_thread(image_utils.make_thumbnail, proc)
-        await asyncio.to_thread(store.put_object, f"{base}_thumb.jpg", thumb, "image/jpeg")
-        doc = {
-            "id": img_id,
-            "tracking_session_id": session_id,
-            "user_id": user["user_id"],
-            "view": "scan",
-            "region": sub,
-            "storage_path": r1["path"],
-            "thumb_path": f"{base}_thumb.jpg",
-            "quality_score": m["quality"],
-            "hairline_score": m["hairline_score"],
-            "density_score": m["density_score"],
-            "coverage_score": m["coverage_score"],
-            "overall_score": m["overall_score"],
-            "confidence": m["confidence"],
-            "visible_scalp_pct": m["visible_scalp_pct"],
-            "hair_coverage_pct": m["hair_coverage_pct"],
-            "created_at": datetime.now(timezone.utc).isoformat(),
-        }
-        await db.images.insert_one(dict(doc))
-
-    return await sessions_service.finalize_day_analysis(user, session_id, region, precision=precision)
+    await db.tracking_sessions.update_one({"id": session_id}, {"$set": {"processing": True}})
+    background_tasks.add_task(sessions_service.process_scan, user, session_id, region, raw_frames, precision)
+    return {"session_id": session_id, "status": "processing"}
 
 
 @router.post("/sessions/{session_id}/upload")

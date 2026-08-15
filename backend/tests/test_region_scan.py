@@ -15,6 +15,8 @@ import pytest
 import requests
 from pymongo import MongoClient
 
+from conftest import wait_for_analysis
+
 BASE_URL = os.environ["REACT_APP_BACKEND_URL"].rstrip("/")
 API = f"{BASE_URL}/api"
 FIX = Path("/app/backend/tests/fixtures")
@@ -76,7 +78,9 @@ class TestFullRegionScan:
         data = [("region", "full")] + [("frame_regions", r) for r in self.REGIONS]
         r = ctx["sess"].post(f"{API}/scan", data=data, files=_files(len(self.REGIONS)), timeout=300)
         assert r.status_code == 200, f"{r.status_code}: {r.text[:800]}"
-        return r.json()
+        session_id = r.json()["session_id"]
+        detail = wait_for_analysis(ctx["sess"], API, session_id)
+        return {"session_id": session_id, "analysis": detail["analysis"]}
 
     def test_no_422_repeated_frame_regions(self, scan_result):
         # scan_result fixture already asserted 200; explicit guard against the old
@@ -163,7 +167,8 @@ class TestSingleRegionScan:
         data = [("region", "crown")] + [("frame_regions", "crown")] * n
         r = ctx["sess"].post(f"{API}/scan", data=data, files=_files(n), timeout=300)
         assert r.status_code == 200, f"{r.status_code}: {r.text[:800]}"
-        a = r.json()["analysis"]
+        detail = wait_for_analysis(ctx["sess"], API, r.json()["session_id"])
+        a = detail["analysis"]
         assert a["region"] == "crown"
         assert list(a["per_region"].keys()) == ["crown"], a["per_region"].keys()
         m = a["per_region"]["crown"]
@@ -192,10 +197,12 @@ class TestOmittedFrameRegions:
     def test_hairline_without_frame_regions(self, ctx):
         r = ctx["sess"].post(f"{API}/scan", data={"region": "hairline"}, files=_files(2), timeout=300)
         assert r.status_code == 200, f"{r.status_code}: {r.text[:800]}"
-        a = r.json()["analysis"]
+        session_id = r.json()["session_id"]
+        detail = wait_for_analysis(ctx["sess"], API, session_id)
+        a = detail["analysis"]
         assert a["region"] == "hairline"
         assert list(a["per_region"].keys()) == ["hairline"], a["per_region"]
-        imgs = list(ctx["db"].images.find({"tracking_session_id": r.json()["session_id"]}, {"_id": 0}))
+        imgs = list(ctx["db"].images.find({"tracking_session_id": session_id}, {"_id": 0}))
         assert all(i["region"] == "hairline" for i in imgs), [i["region"] for i in imgs]
 
     def test_scan_requires_auth(self):

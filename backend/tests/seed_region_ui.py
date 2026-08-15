@@ -11,6 +11,8 @@ from pathlib import Path
 import requests
 from pymongo import MongoClient
 
+from conftest import wait_for_analysis
+
 BASE = os.environ["REACT_APP_BACKEND_URL"].rstrip("/")
 API = f"{BASE}/api"
 FIX = Path("/app/backend/tests/fixtures")
@@ -48,8 +50,8 @@ def main():
     r = s.post(f"{API}/scan", data=data, files=files, timeout=300)
     print("scan:", r.status_code)
     sid = r.json()["session_id"] if r.status_code == 200 else None
-    out["patient"] = {"user_id": uid, "token": tok, "session_id": sid,
-                      "per_region": list((r.json()["analysis"]["per_region"] if sid else {}).keys())}
+    per_region = list(wait_for_analysis(s, API, sid)["analysis"]["per_region"].keys()) if sid else {}
+    out["patient"] = {"user_id": uid, "token": tok, "session_id": sid, "per_region": per_region}
 
     auid, atok = seed("superadmin", email="iampandasubham@gmail.com")
     out["superadmin"] = {"user_id": auid, "token": atok}

@@ -61,7 +61,14 @@ export default function Results() {
   const { sessionId } = useParams();
   const navigate = useNavigate();
   const qc = useQueryClient();
-  const { data: s, isLoading } = useQuery({ queryKey: ["session", sessionId], queryFn: () => fetchSession(sessionId) });
+  const { data: s, isLoading } = useQuery({
+    queryKey: ["session", sessionId],
+    queryFn: () => fetchSession(sessionId),
+    // /scan analyzes in the background now; keep polling while it's still
+    // running (or hasn't started reporting yet) and stop once the analysis
+    // lands or the job gives up without one.
+    refetchInterval: (query) => (query.state.data?.analysis || !query.state.data?.processing ? false : 5000),
+  });
   const [toDelete, setToDelete] = useState(null);
 
   const deleteImage = useMutation({
@@ -103,8 +110,15 @@ export default function Results() {
         </div>
 
         {!a ? (
-          <div className="rounded-2xl border border-border bg-card p-10 text-center">
-            <p className="text-muted-foreground">This scan hasn't been analyzed yet.</p>
+          <div className="rounded-2xl border border-border bg-card p-10 text-center" data-testid="results-not-ready">
+            {s?.processing ? (
+              <>
+                <Loader2 className="w-6 h-6 animate-spin text-primary mx-auto mb-3" />
+                <p className="text-muted-foreground">Analyzing your photos — this usually takes under a minute.</p>
+              </>
+            ) : (
+              <p className="text-muted-foreground">This scan hasn't been analyzed yet.</p>
+            )}
           </div>
         ) : (
           <>
