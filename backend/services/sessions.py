@@ -378,6 +378,41 @@ async def _generate_scalp_map(storage_path: str, user_id: str, session_id: str, 
     return path
 
 
+async def _region_insights(
+    per_region: dict, region_storage_path: dict, baseline: Optional[dict], previous: Optional[dict], session_id: str,
+) -> Optional[dict]:
+    """Region-by-region AI insight (see ai_service.generate_region_insights) --
+    only worth the extra call when there's more than one region to break out;
+    a single-region scan's breakdown would just repeat the overall ai_summary.
+    Returns None on failure or when there's nothing to break out; never blocks
+    the rest of the scan's analysis from saving.
+    """
+    if len(per_region) <= 1:
+        return None
+    previous_per_region = (previous or {}).get("per_region") or {}
+    baseline_per_region = (baseline or {}).get("per_region") or {}
+    regions_payload = {}
+    for reg, m in per_region.items():
+        image_b64 = None
+        sp = region_storage_path.get(reg)
+        if sp:
+            try:
+                data, _ = await asyncio.to_thread(store.get_object, sp)
+                image_b64 = await asyncio.to_thread(image_utils.to_base64_jpeg, data)
+            except Exception:
+                image_b64 = None
+        regions_payload[reg] = {
+            "current": m,
+            "previous": previous_per_region.get(reg),
+            "baseline": baseline_per_region.get(reg),
+            "image_b64": image_b64,
+        }
+    try:
+        return await ai_service.generate_region_insights(regions_payload, session_id)
+    except Exception:
+        return None
+
+
 async def finalize_day_analysis(user: dict, session_id: str, region: str, precision: bool = False) -> dict:
     """Aggregate every analyzed frame captured today into a single analysis
     document. `precision` gates the ensemble re-analysis step below (see
@@ -400,6 +435,7 @@ async def finalize_day_analysis(user: dict, session_id: str, region: str, precis
 
     per_region = {}
     region_spreads: list[int] = []
+    region_storage_path: dict[str, str] = {}
     if len(by_region) <= 1:
         # Single region (crown / hairline / full-with-no-subtags): average the most confident frames.
         only = list(by_region.values())[0] if by_region else usable
@@ -417,6 +453,7 @@ async def finalize_day_analysis(user: dict, session_id: str, region: str, precis
             overall_vals = [f.get("overall_score", 0) for f in topn]
             reg_metrics["spread"] = max(overall_vals) - min(overall_vals)
             region_spreads.append(reg_metrics["spread"])
+        region_storage_path[reg_key] = topn[0]["storage_path"]
         reg_metrics["scalp_map_path"] = await _generate_scalp_map(topn[0]["storage_path"], user["user_id"], session_id, reg_key)
         per_region[reg_key] = reg_metrics
     else:
@@ -433,6 +470,7 @@ async def finalize_day_analysis(user: dict, session_id: str, region: str, precis
             if spread is not None:
                 reg_metrics["spread"] = spread
                 region_spreads.append(spread)
+            region_storage_path[reg] = best["storage_path"]
             reg_metrics["scalp_map_path"] = await _generate_scalp_map(best["storage_path"], user["user_id"], session_id, reg)
             per_region[reg] = reg_metrics
 
@@ -462,6 +500,7 @@ async def finalize_day_analysis(user: dict, session_id: str, region: str, precis
         current_b64=visual["current_b64"], baseline_b64=visual["baseline_b64"], heatmap_b64=visual["heatmap_b64"],
     )
     density_estimate = await _compute_density_estimate(frames, session_id)
+    region_insights = await _region_insights(per_region, region_storage_path, baseline, previous, session_id)
 
     doc = {
         "id": str(uuid.uuid4()),
@@ -476,6 +515,7 @@ async def finalize_day_analysis(user: dict, session_id: str, region: str, precis
         "frames_analyzed": len(frames),
         "frames_used": len(topn),
         "ai_summary": summary,
+        "region_insights": region_insights,
         "density_estimate": density_estimate,
         "created_at": datetime.now(timezone.utc).isoformat(),
     }

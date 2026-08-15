@@ -163,6 +163,11 @@ export default function Results() {
                           <p className="italic text-muted-foreground/70">No hairline reading — not visible from this angle</p>
                         )}
                       </div>
+                      {a.region_insights?.[reg] && (
+                        <p className="text-xs text-foreground/80 mt-3 pt-3 border-t border-border leading-relaxed" data-testid={`region-insight-${reg}`}>
+                          {a.region_insights[reg]}
+                        </p>
+                      )}
                     </div>
                   ))}
                 </div>

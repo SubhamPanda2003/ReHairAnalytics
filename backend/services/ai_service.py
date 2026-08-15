@@ -225,6 +225,85 @@ async def generate_summary(
         )
 
 
+async def generate_region_insights(regions: dict, session_id: str) -> dict:
+    """Short, region-specific insight per captured scalp region in ONE call --
+    so a multi-region scan's takeaway isn't one blended paragraph that hides
+    which specific area actually moved (e.g. front stable, crown thinning).
+    `regions` maps region_key -> {"current": metrics dict, "previous":
+    metrics dict|None, "baseline": metrics dict|None, "image_b64": str|None}.
+    Returns {region_key: insight str}; degrades to a generic per-region line
+    on failure -- must never block the rest of the scan's analysis from saving.
+    """
+    region_keys = list(regions.keys())
+    fallback = {reg: "No specific insight available for this region." for reg in region_keys}
+    if not region_keys:
+        return fallback
+
+    system = (
+        "You are giving a hair-tracking user genuine, specific insight into EACH "
+        "individual region of their scalp separately -- not one blended paragraph. "
+        "Never diagnose disease, never use clinical staging language, never invent "
+        "a measurement you weren't given. For each region, say what the numbers show "
+        "and, if a photo is given for that region, what's actually visible there -- "
+        "and whether the two agree or look like normal photo-to-photo variation. "
+        "Keep each region's insight to one short, specific sentence (under 30 words). "
+        "Respond ONLY with strict JSON."
+    )
+
+    def diff(cur, ref, key):
+        if not ref:
+            return "n/a"
+        cv, rv = cur.get(key), ref.get(key)
+        if cv is None or rv is None:
+            return "n/a"
+        d = cv - rv
+        return f"{'+' if d >= 0 else ''}{d}"
+
+    lines = []
+    file_contents = []
+    image_idx = 0
+    for reg in region_keys:
+        data = regions[reg] or {}
+        cur = data.get("current") or {}
+        prev = data.get("previous")
+        base = data.get("baseline")
+        hairline = cur.get("hairline_score")
+        hairline_txt = "n/a" if hairline is None else hairline
+        line = (
+            f"Region '{reg}': density={cur.get('density_score')}, coverage={cur.get('coverage_score')}, "
+            f"hairline={hairline_txt}. Change vs previous scan: density={diff(cur, prev, 'density_score')}, "
+            f"coverage={diff(cur, prev, 'coverage_score')}, hairline={diff(cur, prev, 'hairline_score')}. "
+            f"Change vs baseline: density={diff(cur, base, 'density_score')}, "
+            f"coverage={diff(cur, base, 'coverage_score')}, hairline={diff(cur, base, 'hairline_score')}."
+        )
+        if data.get("image_b64"):
+            image_idx += 1
+            line += f" (Image {image_idx} shows this region.)"
+            file_contents.append(ImageContent(image_base64=data["image_b64"]))
+        lines.append(line)
+
+    prompt = (
+        "Structured per-region metrics (0-100 scale) for today's scan, one region at a time:\n"
+        + "\n".join(lines)
+        + f"\n\nReturn strict JSON with exactly these keys: {json.dumps(region_keys)}. "
+        "Each value is one short, specific insight sentence for that region."
+    )
+
+    try:
+        chat = _new_chat(f"{session_id}:region-insights", system)
+        msg = UserMessage(text=prompt, file_contents=file_contents or None)
+        resp = await chat.send_message(msg)
+        data = _extract_json(resp)
+        result = {}
+        for reg in region_keys:
+            val = data.get(reg)
+            result[reg] = str(val).strip() if val else fallback[reg]
+        return result
+    except Exception as e:
+        logger.error(f"generate_region_insights failed: {e}")
+        return fallback
+
+
 async def estimate_density_llm(image_b64: str, session_id: str) -> dict:
     """A rough hairs/cm^2 guess straight from the LLM looking at the photo --
     this IS the density estimate; there's no separate CV measurement it's

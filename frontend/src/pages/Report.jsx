@@ -208,6 +208,16 @@ export default function Report() {
                 <div className="rounded-2xl bg-secondary/50 border border-border p-5 mb-6">
                   <h3 className="font-heading font-semibold mb-2">Latest insight</h3>
                   <p className="text-sm leading-relaxed">{a.ai_summary}</p>
+                  {a?.region_insights && Object.keys(a.region_insights).length > 0 && (
+                    <div className="mt-4 pt-4 border-t border-border space-y-2">
+                      {Object.entries(a.region_insights).map(([reg, insight]) => (
+                        <p key={reg} className="text-xs leading-relaxed" data-testid={`report-region-insight-${reg}`}>
+                          <span className="capitalize font-semibold">{reg}: </span>
+                          <span className="text-muted-foreground">{insight}</span>
+                        </p>
+                      ))}
+                    </div>
+                  )}
                 </div>
               )}
 
