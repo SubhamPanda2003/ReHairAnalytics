@@ -1,7 +1,8 @@
 """Iteration-2 backend tests for the new feature batch:
 POST /api/scan (multi-frame parallel analyze + top-N confidence averaging),
-same-day session reuse, region focus, profile reminder, progress date labels,
-GET /api/sessions/{id} best-image fields (side-by-side), existing manual flow.
+same-day scans staying separate sessions, region focus, profile reminder,
+progress date labels, GET /api/sessions/{id} best-image fields (side-by-side),
+existing manual flow.
 
 Uses its OWN fresh seeded user (fixture `fresh_user`) so it is isolated from
 test_backend.py's TestReHairEndToEnd which ends by deleting the account.
@@ -101,37 +102,42 @@ class TestNewFeatures:
         type(self).session_id = session_id
         type(self).first_scores = (a["density_score"], a["coverage_score"], a["hairline_score"])
 
-    # ---------- 2) Same-day reuse: second /scan reuses SAME session ----------
-    def test_02_same_day_scan_reuses_session(self, sc):
+    # ---------- 2) A second /scan later the same day is its OWN session, not a merge ----------
+    def test_02_second_scan_same_day_is_separate_session(self, sc):
         frames = [
             ("files", (f"f_{i}.jpg", _read(f"scan_frame_{i}.jpg"), "image/jpeg"))
-            for i in (0, 2, 4)  # 3 new frames on same day
+            for i in (0, 2, 4)  # 3 frames, a distinct scan later the same day
         ]
         r = sc.post(f"{API}/scan", files=frames, data={"region": "full"}, timeout=240)
         assert r.status_code == 200, r.text
         body = r.json()
-        assert body["session_id"] == self.session_id, "should reuse today's session"
+        assert body["session_id"] != self.session_id, "same-day scans must not be merged into one session"
         a = wait_for_analysis(sc, API, body["session_id"])["analysis"]
-        # 6 previous frames + 3 new = 9
-        assert a["frames_analyzed"] == 9, f"frames_analyzed={a['frames_analyzed']}"
+        assert a["frames_analyzed"] == 3, f"frames_analyzed={a['frames_analyzed']}"
         assert a["frames_used"] == a["frames_analyzed"], f"frames_used={a['frames_used']}"
-        print(f"scan#2 same session, frames_analyzed={a['frames_analyzed']}, "
+        print(f"scan#2 separate session={body['session_id']}, frames_analyzed={a['frames_analyzed']}, "
               f"frames_used={a['frames_used']}")
+        type(self).second_session_id = body["session_id"]
 
-    # ---------- 3) Region focus (crown) ----------
-    def test_03_region_crown_persists(self, sc):
+        # scan#1's own session must be untouched by scan#2.
+        first = wait_for_analysis(sc, API, self.session_id)
+        assert first["analysis"]["frames_analyzed"] == 6, first["analysis"]["frames_analyzed"]
+
+    # ---------- 3) Region focus (crown) also gets its own session ----------
+    def test_03_region_crown_creates_own_session(self, sc):
         frames = [("files", ("c.jpg", _read("scan_frame_1.jpg"), "image/jpeg")),
                   ("files", ("c2.jpg", _read("scan_frame_3.jpg"), "image/jpeg"))]
         r = sc.post(f"{API}/scan", files=frames, data={"region": "crown"}, timeout=240)
         assert r.status_code == 200, r.text
         body = r.json()
-        assert body["session_id"] == self.session_id
+        assert body["session_id"] not in (self.session_id, self.second_session_id)
         detail = wait_for_analysis(sc, API, body["session_id"])
         assert detail["analysis"]["region"] == "crown"
         # verify session doc reflects region
-        rs = sc.get(f"{API}/sessions/{self.session_id}")
+        rs = sc.get(f"{API}/sessions/{body['session_id']}")
         assert rs.status_code == 200
         assert rs.json().get("region") == "crown"
+        type(self).crown_session_id = body["session_id"]
 
     # ---------- 4) Invalid region falls back to 'full' ----------
     def test_04_invalid_region_falls_back(self, sc):
@@ -184,31 +190,33 @@ class TestNewFeatures:
         r = sc.get(f"{API}/sessions/{self.session_id}")
         assert r.status_code == 200
         s = r.json()
-        # 8 stored frames (6 + 3 same-day + 2 crown + 1 fallback) = 12; storage_path present
+        # scan#1's session only ever got its own 6 frames -- later same-day scans
+        # (2, 3, 4) each created their own separate session, not more frames here.
         assert s.get("current_best_image"), "current_best_image missing"
         assert s["current_best_image"].startswith("rehairanalytics/uploads/")
-        # baseline == current here (single session), so baseline_best_image is None
+        # baseline == current here (it's the first session ever), so baseline_best_image is None
         assert s["baseline_best_image"] is None
         assert s["baseline_analysis"] is None
-        # previous is None for baseline session
+        # previous is None for the baseline session
         assert s["previous_analysis"] is None
         assert s["previous_best_image"] is None
         assert "analysis" in s and s["analysis"] is not None
         # each stored image has region
         imgs = s.get("images") or []
-        assert len(imgs) >= 8
+        assert len(imgs) == 6, len(imgs)
         assert all("region" in i for i in imgs)
 
-    # ---------- 9) Manual flow still works: POST /sessions today reuses, upload+analyze ----------
+    # ---------- 9) Manual flow still works: POST /sessions creates its own session, upload+analyze ----------
     def test_09_manual_upload_still_works(self, sc):
-        # POST /sessions on same day should return SAME session
+        # POST /sessions always creates its own new session now (no same-day reuse).
         r = sc.post(f"{API}/sessions", json={"notes": "manual"})
         assert r.status_code == 200
-        assert r.json()["id"] == self.session_id
+        manual_session_id = r.json()["id"]
+        assert manual_session_id not in (self.session_id, self.second_session_id, self.crown_session_id)
 
         # Upload one manual view (real photo)
         files = {"file": ("front.jpg", _read("scalp_front.jpg"), "image/jpeg")}
-        u = sc.post(f"{API}/sessions/{self.session_id}/upload",
+        u = sc.post(f"{API}/sessions/{manual_session_id}/upload",
                     files=files, data={"view": "front"}, timeout=180)
         assert u.status_code == 200, u.text
         udata = u.json()
@@ -219,7 +227,7 @@ class TestNewFeatures:
         assert udata["storage_path"].startswith("rehairanalytics/uploads/")
 
         # analyze again (uses this manual image)
-        an = sc.post(f"{API}/sessions/{self.session_id}/analyze", timeout=180)
+        an = sc.post(f"{API}/sessions/{manual_session_id}/analyze", timeout=180)
         assert an.status_code == 200, an.text
         a = an.json()["analysis"]
         for k in ("density_score", "coverage_score", "hairline_score", "overall_score"):

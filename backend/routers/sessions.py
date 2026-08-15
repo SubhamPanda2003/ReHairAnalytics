@@ -18,12 +18,12 @@ router = APIRouter(tags=["sessions"])
 
 @router.post("/sessions")
 async def create_session(body: SessionIn, user: CurrentUser):
-    return await sessions_service.get_or_create_today_session(user["user_id"], body.notes or "")
+    return await sessions_service.create_tracking_session(user["user_id"], body.notes or "")
 
 
 @router.get("/sessions")
 async def list_sessions(user: CurrentUser):
-    sessions = await db.tracking_sessions.find({"user_id": user["user_id"]}, {"_id": 0}).sort("week_number", 1).to_list(1000)
+    sessions = await db.tracking_sessions.find({"user_id": user["user_id"]}, {"_id": 0}).sort("date", 1).to_list(1000)
     return await sessions_service.attach_children(sessions)
 
 
@@ -103,7 +103,7 @@ async def auto_scan(
     """
     if region not in ("full", "crown", "hairline"):
         region = "full"
-    session = await sessions_service.get_or_create_today_session(user["user_id"])
+    session = await sessions_service.create_tracking_session(user["user_id"])
     session_id = session["id"]
 
     regions_in = frame_regions or []

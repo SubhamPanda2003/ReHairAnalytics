@@ -83,9 +83,9 @@ export default function Dashboard() {
             {/* Metric cards */}
             <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 md:gap-6 mb-6">
               <Card delay={0} data-testid="card-streak">
-                <div className="flex items-center gap-2 text-muted-foreground text-xs uppercase tracking-[0.15em] mb-3"><Flame className="w-4 h-4" /> Streak</div>
+                <div className="flex items-center gap-2 text-muted-foreground text-xs uppercase tracking-[0.15em] mb-3"><Flame className="w-4 h-4" /> Scans</div>
                 <p className="font-heading text-4xl font-bold">{progress.streak}</p>
-                <p className="text-sm text-muted-foreground mt-1">weekly scans</p>
+                <p className="text-sm text-muted-foreground mt-1">total scans logged</p>
               </Card>
               <Card delay={0.05} data-testid="card-latest-upload">
                 <div className="flex items-center gap-2 text-muted-foreground text-xs uppercase tracking-[0.15em] mb-3"><ImageIcon className="w-4 h-4" /> Latest</div>
@@ -154,7 +154,7 @@ export default function Dashboard() {
               </div>
               <div className="flex gap-4 overflow-x-auto pb-2">
                 {[...(timeline || [])].reverse().map((s) => (
-                  <button key={s.id} onClick={() => navigate(`/results/${s.id}`)} data-testid={`milestone-${s.week_number}`}
+                  <button key={s.id} onClick={() => navigate(`/results/${s.id}`)} data-testid={`milestone-${s.id}`}
                     className="min-w-[160px] rounded-2xl border border-border overflow-hidden text-left hover:-translate-y-1 transition-transform duration-200 bg-secondary/40">
                     {s.images?.[0] ? <img src={fileUrl(s.images[0].thumb_path)} alt="" className="w-full h-24 object-cover" /> : <div className="w-full h-24 bg-muted" />}
                     <div className="p-3">

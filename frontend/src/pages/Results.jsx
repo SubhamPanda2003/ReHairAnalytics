@@ -98,7 +98,9 @@ export default function Results() {
         <Button variant="ghost" onClick={() => navigate(-1)} className="rounded-full mb-4" data-testid="results-back"><ArrowLeft className="w-4 h-4 mr-1" /> Back</Button>
         <div className="flex flex-wrap items-end justify-between gap-3 mb-8">
           <div>
-            <p className="text-xs uppercase tracking-[0.2em] text-muted-foreground">{s?.date ? new Date(s.date).toLocaleDateString(undefined, { weekday: "short", month: "short", day: "numeric", year: "numeric" }) : `Week ${s?.week_number}`}</p>
+            <p className="text-xs uppercase tracking-[0.2em] text-muted-foreground">
+              {s?.date && `${new Date(s.date).toLocaleDateString(undefined, { weekday: "short", month: "short", day: "numeric", year: "numeric" })} · ${new Date(s.date).toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" })}`}
+            </p>
             <h1 className="font-heading text-3xl font-bold tracking-tight">Scan results</h1>
           </div>
           <div className="flex items-center gap-2">

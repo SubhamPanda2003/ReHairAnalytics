@@ -89,16 +89,16 @@ class TestReHairEndToEnd:
         r = auth_client.post(f"{API}/sessions", json={"notes": "baseline"})
         assert r.status_code == 200, r.text
         data = r.json()
-        assert "id" in data and data["week_number"] == 0
+        assert "id" in data
         type(self).session_id = data["id"]
 
-    def test_09_second_session_increments(self, auth_client):
-        # iter-2: sessions are per-DAY now. A second POST on the same day
-        # reuses today's session (same id, same week_number).
-        r = auth_client.post(f"{API}/sessions", json={"notes": "week2"})
+    def test_09_second_session_is_separate(self, auth_client):
+        # Every POST /sessions creates its own session now (no same-day reuse),
+        # so a user can have multiple distinct, independently viewable scans
+        # on the same day.
+        r = auth_client.post(f"{API}/sessions", json={"notes": "second"})
         assert r.status_code == 200
-        assert r.json()["id"] == self.session_id
-        assert r.json()["week_number"] == 0
+        assert r.json()["id"] != self.session_id
 
     def test_10_list_sessions(self, auth_client):
         r = auth_client.get(f"{API}/sessions")

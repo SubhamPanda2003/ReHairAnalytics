@@ -89,11 +89,14 @@ export default function Timeline() {
                   className="relative mb-4 group">
                   <span className="absolute -left-[22px] top-6 w-3 h-3 rounded-full bg-primary ring-4 ring-background" />
                   <div className="rounded-2xl border border-border bg-card p-4 flex items-center gap-4 hover:-translate-y-0.5 transition-transform duration-200">
-                    <button onClick={() => navigate(`/results/${s.id}`)} data-testid={`timeline-milestone-${s.week_number}`}
+                    <button onClick={() => navigate(`/results/${s.id}`)} data-testid={`timeline-milestone-${s.id}`}
                       className="flex items-center gap-4 flex-1 min-w-0 text-left">
                       {s.images?.[0] ? <img src={fileUrl(s.images[0].thumb_path)} alt="" className="w-16 h-16 rounded-xl object-cover" /> : <div className="w-16 h-16 rounded-xl bg-muted flex items-center justify-center"><ImageOff className="w-5 h-5 text-muted-foreground" /></div>}
                       <div className="flex-1 min-w-0">
-                        <p className="font-heading font-semibold">{new Date(s.date).toLocaleDateString(undefined, { weekday: "short", month: "short", day: "numeric" })}</p>
+                        <p className="font-heading font-semibold">
+                          {new Date(s.date).toLocaleDateString(undefined, { weekday: "short", month: "short", day: "numeric" })}
+                          <span className="text-muted-foreground font-normal"> · {new Date(s.date).toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" })}</span>
+                        </p>
                         <p className="text-xs text-muted-foreground">{s.region && s.region !== "full" ? `${s.region} focus · ` : ""}{s.images?.length || 0} photos</p>
                         {s.analysis ? (
                           <div className="flex gap-3 mt-1.5 text-xs">
@@ -111,7 +114,7 @@ export default function Timeline() {
                       onClick={() => setToDelete(s)}
                       className="shrink-0 w-8 h-8 rounded-full flex items-center justify-center text-muted-foreground hover:bg-destructive hover:text-destructive-foreground transition-colors duration-200"
                       aria-label={`Delete scan from ${new Date(s.date).toLocaleDateString()}`}
-                      data-testid={`delete-week-${s.week_number}`}
+                      data-testid={`delete-scan-${s.id}`}
                     >
                       <Trash2 className="w-4 h-4" />
                     </button>

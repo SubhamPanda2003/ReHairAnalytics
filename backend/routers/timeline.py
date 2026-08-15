@@ -13,20 +13,19 @@ router = APIRouter(tags=["timeline"])
 
 @router.get("/timeline")
 async def timeline(user: CurrentUser):
-    sessions = await db.tracking_sessions.find({"user_id": user["user_id"]}, {"_id": 0}).sort("week_number", 1).to_list(1000)
+    sessions = await db.tracking_sessions.find({"user_id": user["user_id"]}, {"_id": 0}).sort("date", 1).to_list(1000)
     return await sessions_service.attach_children(sessions)
 
 
 @router.get("/progress")
 async def progress(user: CurrentUser):
-    sessions = await db.tracking_sessions.find({"user_id": user["user_id"]}, {"_id": 0}).sort("week_number", 1).to_list(1000)
+    sessions = await db.tracking_sessions.find({"user_id": user["user_id"]}, {"_id": 0}).sort("date", 1).to_list(1000)
     points = []
     for s in sessions:
         a = await db.analysis.find_one({"tracking_session_id": s["id"]}, {"_id": 0})
         if a:
             _dt = datetime.fromisoformat(s["date"]) if isinstance(s["date"], str) else s["date"]
             points.append({
-                "week": s["week_number"],
                 "label": _dt.strftime("%b %d"),
                 "date": s["date"],
                 "density": a["density_score"],

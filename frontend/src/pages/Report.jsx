@@ -170,19 +170,20 @@ export default function Report() {
                 </div>
               )}
 
-              {/* Weekly photo timeline */}
+              {/* Photo timeline */}
               {timeline && timeline.length > 0 && (
                 <div className="mb-8">
-                  <h3 className="font-heading font-semibold mb-1">Weekly photo timeline</h3>
-                  <p className="text-xs text-muted-foreground mb-4">Best photo per captured region each week (up to 6), alongside that week's measurements.</p>
+                  <h3 className="font-heading font-semibold mb-1">Photo timeline</h3>
+                  <p className="text-xs text-muted-foreground mb-4">Best photo per captured region for each scan (up to 6), alongside that scan's measurements.</p>
                   <div className="space-y-4">
                     {timeline.map((s) => {
                       const regionPhotos = bestPerRegion(s.images);
                       return (
-                        <div key={s.id} className="rounded-2xl border border-border p-4" data-testid={`report-week-${s.week_number}`}>
+                        <div key={s.id} className="rounded-2xl border border-border p-4" data-testid={`report-scan-${s.id}`}>
                           <div className="flex items-center justify-between mb-3">
                             <p className="text-sm font-semibold">
-                              Week {s.week_number} <span className="text-muted-foreground font-normal">· {new Date(s.date).toLocaleDateString(undefined, { month: "short", day: "numeric" })}</span>
+                              {new Date(s.date).toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" })}
+                              <span className="text-muted-foreground font-normal"> · {new Date(s.date).toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" })}</span>
                             </p>
                             <p className="text-xs text-muted-foreground">{s.analysis ? <>Overall <b className="text-foreground">{s.analysis.overall_score}</b></> : "Not analyzed"}</p>
                           </div>

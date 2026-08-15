@@ -84,21 +84,14 @@ async def _ensemble_frame(frame: dict, session_id: str) -> tuple[dict, Optional[
     return await ensemble_score(b64, view, region, session_id, frame)
 
 
-def today_str() -> str:
-    return datetime.now(timezone.utc).strftime("%Y-%m-%d")
-
-
-async def get_or_create_today_session(user_id: str, notes: str = "") -> dict:
-    day = today_str()
-    existing = await db.tracking_sessions.find_one({"user_id": user_id, "day": day}, {"_id": 0})
-    if existing:
-        return existing
-    count = await db.tracking_sessions.count_documents({"user_id": user_id})
+async def create_tracking_session(user_id: str, notes: str = "") -> dict:
+    """Every call creates its own session, identified by a precise timestamp
+    (not just a calendar date) -- so scanning again later today doesn't get
+    silently merged into this morning's session, and multiple scans on the
+    same day show up as distinct, independently viewable results."""
     doc = {
         "id": str(uuid.uuid4()),
         "user_id": user_id,
-        "week_number": count,
-        "day": day,
         "date": datetime.now(timezone.utc).isoformat(),
         "notes": notes or "",
         "analyzed": False,
@@ -166,7 +159,7 @@ async def matched_best_images(session_a_id: str, session_b_id: str) -> dict:
 
 
 async def get_baseline_session_id(user_id: str) -> Optional[str]:
-    first = await db.tracking_sessions.find({"user_id": user_id}, {"_id": 0, "id": 1}).sort("week_number", 1).to_list(1)
+    first = await db.tracking_sessions.find({"user_id": user_id}, {"_id": 0, "id": 1}).sort("date", 1).to_list(1)
     return first[0]["id"] if first else None
 
 
@@ -269,7 +262,7 @@ async def get_comparison_context(user_id: str, session_id: str) -> dict:
     the side-by-side comparison shows the same part of the scalp, not whichever
     photo happened to score highest in each session independently.
     """
-    all_sessions = await db.tracking_sessions.find({"user_id": user_id}, {"_id": 0}).sort("week_number", 1).to_list(1000)
+    all_sessions = await db.tracking_sessions.find({"user_id": user_id}, {"_id": 0}).sort("date", 1).to_list(1000)
     if not all_sessions:
         return {
             "previous_analysis": None, "previous_best_image": None,
@@ -311,7 +304,7 @@ async def get_comparison_context(user_id: str, session_id: str) -> dict:
 
 async def get_baseline_and_previous(user_id: str, session_id: str):
     """Return (baseline_analysis, previous_analysis) relative to session_id in the user's timeline."""
-    all_sessions = await db.tracking_sessions.find({"user_id": user_id}, {"_id": 0}).sort("week_number", 1).to_list(1000)
+    all_sessions = await db.tracking_sessions.find({"user_id": user_id}, {"_id": 0}).sort("date", 1).to_list(1000)
     baseline = await _blended_baseline(all_sessions) if all_sessions else None
     idx = next((i for i, x in enumerate(all_sessions) if x["id"] == session_id), 0)
     previous = None
