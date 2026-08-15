@@ -56,6 +56,17 @@ def create_app() -> FastAPI:
 
     @app.on_event("startup")
     async def startup() -> None:
+        if config.CORS_ORIGINS == ["*"]:
+            # allow_credentials=True + a wildcard origin means the browser's own
+            # CORS rules force this middleware to reflect whatever Origin the
+            # request sent -- i.e. ANY site can make credentialed requests using
+            # a visitor's session cookie. Fine for local dev; never for prod.
+            logger.warning(
+                "CORS_ORIGINS is not set (defaulting to '*') -- combined with "
+                "allow_credentials=True this lets any origin make authenticated "
+                "requests using a visitor's session cookie. Set CORS_ORIGINS to "
+                "the real frontend origin(s) before going to production."
+            )
         try:
             store.init_storage()
             logger.info("Storage initialized")

@@ -25,6 +25,8 @@ async def download_file(
     except HTTPException:
         raise HTTPException(status_code=401, detail="Not authenticated")
     record = await db.images.find_one({"$or": [{"storage_path": path}, {"thumb_path": path}]}, {"_id": 0})
+    if record and record.get("user_id") != user["user_id"]:
+        raise HTTPException(status_code=404, detail="File not found")
     if not record:
         # Derived images (e.g. change-map heatmaps, scalp maps) intentionally
         # aren't rows in db.images -- they're not captured photos, so they
