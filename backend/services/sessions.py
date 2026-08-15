@@ -391,22 +391,27 @@ async def _region_insights(
         return None
     previous_per_region = (previous or {}).get("per_region") or {}
     baseline_per_region = (baseline or {}).get("per_region") or {}
-    regions_payload = {}
-    for reg, m in per_region.items():
-        image_b64 = None
-        sp = region_storage_path.get(reg)
-        if sp:
-            try:
-                data, _ = await asyncio.to_thread(store.get_object, sp)
-                image_b64 = await asyncio.to_thread(image_utils.to_base64_jpeg, data)
-            except Exception:
-                image_b64 = None
-        regions_payload[reg] = {
-            "current": m,
+
+    async def fetch_b64(sp: Optional[str]) -> Optional[str]:
+        if not sp:
+            return None
+        try:
+            data, _ = await asyncio.to_thread(store.get_object, sp)
+            return await asyncio.to_thread(image_utils.to_base64_jpeg, data)
+        except Exception:
+            return None
+
+    regs = list(per_region.keys())
+    images = await asyncio.gather(*[fetch_b64(region_storage_path.get(reg)) for reg in regs])
+    regions_payload = {
+        reg: {
+            "current": per_region[reg],
             "previous": previous_per_region.get(reg),
             "baseline": baseline_per_region.get(reg),
             "image_b64": image_b64,
         }
+        for reg, image_b64 in zip(regs, images)
+    }
     try:
         return await ai_service.generate_region_insights(regions_payload, session_id)
     except Exception:
@@ -459,19 +464,26 @@ async def finalize_day_analysis(user: dict, session_id: str, region: str, precis
     else:
         # Full scan: pick the single best-confidence frame per region, ensemble-reanalyze
         # just that one frame a few times to cancel out per-call noise, then blend those.
-        topn = []
-        for reg, fl in by_region.items():
+        # Each region's work (ensemble re-read + scalp map) is independent of every other
+        # region's, so they run concurrently -- doing 6 regions one at a time here was
+        # stacking latency straight onto the /scan request Cloudflare is waiting on.
+        async def process_region(reg: str, fl: list[dict]):
             best = max(fl, key=lambda x: x.get("confidence", 0))
             ensembled, spread = await _ensemble_frame(best, session_id) if precision else (best, None)
-            topn.append(ensembled)
             reg_metrics = {k: ensembled.get(k, 0) for k in METRIC_KEYS}
             if ensembled.get("hairline_score") is not None:
                 reg_metrics["hairline_score"] = ensembled["hairline_score"]
+            reg_metrics["scalp_map_path"] = await _generate_scalp_map(best["storage_path"], user["user_id"], session_id, reg)
+            return reg, ensembled, spread, reg_metrics, best["storage_path"]
+
+        results = await asyncio.gather(*[process_region(reg, fl) for reg, fl in by_region.items()])
+        topn = []
+        for reg, ensembled, spread, reg_metrics, storage_path in results:
+            topn.append(ensembled)
             if spread is not None:
                 reg_metrics["spread"] = spread
                 region_spreads.append(spread)
-            region_storage_path[reg] = best["storage_path"]
-            reg_metrics["scalp_map_path"] = await _generate_scalp_map(best["storage_path"], user["user_id"], session_id, reg)
+            region_storage_path[reg] = storage_path
             per_region[reg] = reg_metrics
 
     def avg(key: str) -> int:
@@ -495,12 +507,16 @@ async def finalize_day_analysis(user: dict, session_id: str, region: str, precis
     baseline, previous = await get_baseline_and_previous(user["user_id"], session_id)
     current_best = await best_image_path(session_id)
     visual = await compute_visual_context(user["user_id"], session_id, current_best)
-    summary = await ai_service.generate_summary(
-        metrics, previous or {}, baseline or {}, session_id,
-        current_b64=visual["current_b64"], baseline_b64=visual["baseline_b64"], heatmap_b64=visual["heatmap_b64"],
+    # These three are independent of each other -- none consumes another's output --
+    # so they run concurrently instead of stacking three LLM round-trips in sequence.
+    summary, density_estimate, region_insights = await asyncio.gather(
+        ai_service.generate_summary(
+            metrics, previous or {}, baseline or {}, session_id,
+            current_b64=visual["current_b64"], baseline_b64=visual["baseline_b64"], heatmap_b64=visual["heatmap_b64"],
+        ),
+        _compute_density_estimate(frames, session_id),
+        _region_insights(per_region, region_storage_path, baseline, previous, session_id),
     )
-    density_estimate = await _compute_density_estimate(frames, session_id)
-    region_insights = await _region_insights(per_region, region_storage_path, baseline, previous, session_id)
 
     doc = {
         "id": str(uuid.uuid4()),
