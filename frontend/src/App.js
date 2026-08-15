@@ -18,6 +18,7 @@ import Report from "@/pages/Report";
 import Dermatologists from "@/pages/Dermatologists";
 import DermPractice from "@/pages/DermPractice";
 import Admin from "@/pages/Admin";
+import NotFound from "@/pages/NotFound";
 
 function AppRouter() {
   const location = useLocation();
@@ -37,6 +38,7 @@ function AppRouter() {
       <Route path="/derm" element={<ProtectedRoute><DermPractice /></ProtectedRoute>} />
       <Route path="/admin" element={<ProtectedRoute><Admin /></ProtectedRoute>} />
       <Route path="/settings" element={<ProtectedRoute><Settings /></ProtectedRoute>} />
+      <Route path="*" element={<NotFound />} />
     </Routes>
   );
 }

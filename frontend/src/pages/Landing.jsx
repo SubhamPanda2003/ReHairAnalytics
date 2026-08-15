@@ -3,6 +3,7 @@ import { motion } from "framer-motion";
 import { useNavigate } from "react-router-dom";
 import { useAuth } from "@/context/AuthContext";
 import { Button } from "@/components/ui/button";
+import { toast } from "sonner";
 import { Activity, Camera, LineChart, ShieldCheck, Sparkles, Ruler, Clock, ArrowRight, Check, Stethoscope, X } from "lucide-react";
 
 // REMINDER: DO NOT HARDCODE THE URL, OR ADD ANY FALLBACKS OR REDIRECT URLS, THIS BREAKS THE AUTH
@@ -29,6 +30,16 @@ export default function Landing() {
   const { user } = useAuth();
   const navigate = useNavigate();
   useEffect(() => { if (user) navigate("/dashboard"); }, [user, navigate]);
+
+  // Landed here via the global 401 handler (lib/api.js) after a session went
+  // stale mid-visit, rather than a normal logged-out page view -- say so,
+  // instead of silently bouncing them with no explanation.
+  useEffect(() => {
+    if (new URLSearchParams(window.location.search).get("session_expired") === "1") {
+      toast.error("Your session expired. Please log in again.");
+      window.history.replaceState(null, "", window.location.pathname);
+    }
+  }, []);
 
   return (
     <div className="min-h-screen bg-background text-foreground" data-testid="landing-page">
