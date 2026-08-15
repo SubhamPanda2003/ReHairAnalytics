@@ -1,7 +1,7 @@
 """End-to-end backend API tests for ReHairAnalytics (single class so xdist loadscope keeps state).
 
 Covers: auth (bearer + cookie), profile, sessions, image upload (real JPEG),
-AI quality + analyze (real gpt-5.6-terra), timeline, progress, file download, export, delete.
+AI quality + analyze (real gemini-2.5-flash), timeline, progress, file download, export, delete.
 """
 import io
 import os

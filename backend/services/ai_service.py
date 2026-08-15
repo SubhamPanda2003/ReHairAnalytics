@@ -9,7 +9,9 @@ load_dotenv()
 logger = logging.getLogger(__name__)
 
 EMERGENT_LLM_KEY = os.environ.get("EMERGENT_LLM_KEY")
-MODEL = ("openai", "gpt-5.6-terra")
+# Gemini 2.5 Flash: confirmed multimodal (text/image/video/audio in, text out),
+# which every call in this file needs since each one sends at least one photo.
+MODEL = ("gemini", "gemini-2.5-flash")
 
 # Low temperature for anything that produces a *measurement* meant to be compared
 # week over week -- default sampling temperature is tuned for varied, creative
