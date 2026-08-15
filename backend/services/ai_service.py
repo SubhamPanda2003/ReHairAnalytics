@@ -4,23 +4,12 @@ import re
 import logging
 from dotenv import load_dotenv
 from emergentintegrations.llm.chat import LlmChat, UserMessage, ImageContent
+from utils.constants import MODEL, MEASUREMENT_TEMPERATURE, REGION_FOCUS, HAIRLINE_VISIBLE_REGIONS
 
 load_dotenv()
 logger = logging.getLogger(__name__)
 
 EMERGENT_LLM_KEY = os.environ.get("EMERGENT_LLM_KEY")
-# Gemini 2.5 Flash: confirmed multimodal (text/image/video/audio in, text out),
-# which every call in this file needs since each one sends at least one photo.
-MODEL = ("gemini", "gemini-2.5-flash")
-
-# Low temperature for anything that produces a *measurement* meant to be compared
-# week over week -- default sampling temperature is tuned for varied, creative
-# text, which is the opposite of what a repeatable number needs. This isn't
-# verified against the real emergentintegrations SDK (no live credentials in this
-# dev environment), so it's applied defensively: if with_model() doesn't accept a
-# temperature kwarg in the installed SDK version, fall back to the old call
-# instead of crashing every AI request.
-MEASUREMENT_TEMPERATURE = 0.0
 
 
 def _new_chat(session_id: str, system_message: str, temperature: float = None) -> LlmChat:
@@ -89,20 +78,6 @@ async def analyze_quality(image_b64: str, view: str, session_id: str) -> dict:
     except Exception as e:
         logger.error(f"analyze_quality failed: {e}")
         return {"quality": 72, "issues": ["Automated quality check unavailable; accepted with default score."], "retry": False}
-
-
-REGION_FOCUS = {
-    "full": "Assess the entire visible scalp and hair evenly.",
-    "crown": "Focus specifically on the CROWN / VERTEX (top-back) area — its density and how much scalp shows through there.",
-    "hairline": "Focus specifically on the FRONTAL HAIRLINE and temples — the boundary position, peak, and any temple recession.",
-}
-
-# The frontal hairline isn't visible from the crown, the back of the head, or a
-# straight-down top shot -- asking the model to score it there just produces a
-# guess with no anatomical basis, and that guess was previously getting averaged
-# into the headline hairline score. Only request/report hairline_score for views
-# where it's actually in frame.
-HAIRLINE_VISIBLE_REGIONS = {"full", "front", "hairline", "left", "right"}
 
 
 async def analyze_metrics(image_b64: str, view: str, session_id: str, region: str = "full") -> dict:

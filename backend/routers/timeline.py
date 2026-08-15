@@ -5,6 +5,7 @@ from fastapi import APIRouter
 
 from models.database import db
 from utils.deps import CurrentUser
+from utils.constants import DEFAULT_NOISE_FLOOR
 from services import sessions as sessions_service
 
 router = APIRouter(tags=["timeline"])
@@ -14,12 +15,6 @@ router = APIRouter(tags=["timeline"])
 async def timeline(user: CurrentUser):
     sessions = await db.tracking_sessions.find({"user_id": user["user_id"]}, {"_id": 0}).sort("week_number", 1).to_list(1000)
     return await sessions_service.attach_children(sessions)
-
-
-# Used only when a session has no measured spread at all (e.g. ensembling never
-# ran because the photo couldn't be re-fetched) -- a documented assumption, not a
-# measured value, so treat it as conservative rather than precise.
-DEFAULT_NOISE_FLOOR = 4
 
 
 @router.get("/progress")

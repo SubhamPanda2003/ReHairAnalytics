@@ -3,6 +3,8 @@ import cv2
 import numpy as np
 from PIL import Image, ImageOps
 
+from .constants import MIN_ALIGN_MATCHES
+
 
 def process_image(data: bytes, max_dim: int = 1600, quality: int = 82):
     """Strip metadata, resize, compress. Returns (jpeg_bytes, content_type).
@@ -45,9 +47,6 @@ def to_base64_jpeg(data: bytes) -> str:
     out = io.BytesIO()
     img.save(out, format="JPEG", quality=80)
     return base64.b64encode(out.getvalue()).decode()
-
-
-MIN_ALIGN_MATCHES = 10
 
 
 def _decode_bgr(data: bytes):

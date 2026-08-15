@@ -11,26 +11,7 @@ from . import ai_service
 from . import storage as store
 from models.database import db
 from utils import image_utils
-
-
-# hairline_score is handled separately from the other metrics: it's only ever
-# populated for frames from a region where a frontal hairline is actually visible
-# (see ai_service.HAIRLINE_VISIBLE_REGIONS), so it can't be blindly averaged
-# alongside metrics every frame has.
-METRIC_KEYS = [
-    "density_score", "coverage_score", "overall_score",
-    "confidence", "quality_score", "visible_scalp_pct", "hair_coverage_pct",
-]
-DELTA_KEYS = ("density", "coverage", "hairline", "overall")
-BLUR_QUALITY_MIN = 40
-
-# How many independent times to re-analyze the single photo that ends up
-# representing each region, before finalizing its score. A vision-LLM call is a
-# stochastic sample, not a fixed readout -- one call is one sample of that noise.
-# Applied only to the frame that actually wins each region (not every captured
-# frame) to keep the added cost/latency bounded: for a 6-region scan this adds
-# up to 6 * (ENSEMBLE_N - 1) extra calls, not 30+.
-ENSEMBLE_N = 3
+from utils.constants import METRIC_KEYS, DELTA_KEYS, BLUR_QUALITY_MIN, ENSEMBLE_N, REGION_ORDER, BASELINE_BLEND_N
 
 
 def _avg_hairline(frames: list[dict]):
@@ -98,11 +79,6 @@ async def _ensemble_frame(frame: dict, session_id: str) -> tuple[dict, Optional[
     region = frame.get("region") or "full"
     view = frame.get("view") or "scan"
     return await ensemble_score(b64, view, region, session_id, frame)
-
-# Auto-scan frames carry a `region` (front/left/right/crown/hairline/back); manual
-# uploads carry a `view` (front/top/left/right/back) instead -- present order for
-# whichever tag is available.
-REGION_ORDER = ["front", "left", "right", "crown", "hairline", "back", "top"]
 
 
 def today_str() -> str:
@@ -252,14 +228,6 @@ async def attach_children(sessions: list[dict]) -> list[dict]:
         s["analysis"] = ana_map.get(s["id"])
     return sessions
 
-
-# A single early session's score is just as noisy as any other single reading --
-# if that one day happened to get an unlucky AI call, every future comparison
-# inherits that error forever. Blending the first few sessions' scores together
-# makes the reference point itself less sensitive to one bad day. The baseline
-# *photo* deliberately stays single-session (pixels can't be averaged the same
-# way, and change-maps needs one concrete image to align against).
-BASELINE_BLEND_N = 3
 
 _BLEND_KEYS = ("density_score", "coverage_score", "overall_score", "confidence",
                "quality_score", "visible_scalp_pct", "hair_coverage_pct")
