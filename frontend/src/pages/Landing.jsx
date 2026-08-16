@@ -54,7 +54,7 @@ export default function Landing() {
             <span className="font-heading font-bold text-lg tracking-tight">ReHairAnalytics</span>
           </div>
           <div className="flex items-center gap-2">
-            <Button variant="ghost" onClick={login} data-testid="nav-login-btn" className="rounded-full">Log in</Button>
+            <Button variant="ghost" onClick={login} data-testid="nav-login-btn" className="rounded-full hidden sm:inline-flex">Log in</Button>
             <Button onClick={login} data-testid="nav-signup-btn" className="rounded-full">Get started</Button>
           </div>
         </div>

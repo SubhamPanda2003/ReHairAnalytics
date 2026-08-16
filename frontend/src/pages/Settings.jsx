@@ -79,12 +79,12 @@ export default function Settings() {
   };
 
   const Row = ({ icon: Icon, title, desc, children, testId }) => (
-    <div className="flex items-center justify-between gap-4 py-5 border-b border-border last:border-0" data-testid={testId}>
-      <div className="flex items-start gap-3">
+    <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 sm:gap-4 py-5 border-b border-border last:border-0" data-testid={testId}>
+      <div className="flex items-start gap-3 min-w-0">
         <div className="w-9 h-9 rounded-xl bg-accent flex items-center justify-center shrink-0"><Icon className="w-4 h-4 text-accent-foreground" /></div>
-        <div><p className="font-medium">{title}</p><p className="text-sm text-muted-foreground">{desc}</p></div>
+        <div className="min-w-0"><p className="font-medium">{title}</p><p className="text-sm text-muted-foreground">{desc}</p></div>
       </div>
-      <div className="shrink-0">{children}</div>
+      <div className="shrink-0 pl-12 sm:pl-0">{children}</div>
     </div>
   );
 
