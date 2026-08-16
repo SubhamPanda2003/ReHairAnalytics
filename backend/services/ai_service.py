@@ -126,6 +126,13 @@ async def analyze_metrics(image_b64: str, view: str, session_id: str, region: st
         msg = UserMessage(text=prompt, file_contents=[ImageContent(image_base64=image_b64)])
         resp = await chat.send_message(msg)
         data = _extract_json(resp)
+        if not data.get("density_score") and not data.get("coverage_score"):
+            # The call itself succeeded (no exception), but the response didn't
+            # contain parseable/expected fields, so every score below silently
+            # falls back to LLM_FAILURE_SENTINEL -- log the raw response here or
+            # this failure mode is completely invisible; nothing downstream ever
+            # raises for it.
+            logger.warning(f"analyze_metrics: no usable score fields in response: {(resp or '')[:300]!r}")
         density = _clamp(data.get("density_score"), default=LLM_FAILURE_SENTINEL)
         coverage = _clamp(data.get("coverage_score"), default=LLM_FAILURE_SENTINEL)
         hairline = _clamp(data.get("hairline_score"), default=LLM_FAILURE_SENTINEL) if include_hairline else None
