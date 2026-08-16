@@ -130,3 +130,20 @@ ALIGN_CORRECTION_MIN_MATCHES = 25
 # strong blur (radius=4) scored 6-35. This sits in the gap between the
 # strong-blur ceiling and the mild-blur floor.
 BLUR_VARIANCE_MIN = 40
+
+# mark_scalp_patches' k-means step assigns every pixel to its NEAREST of 3
+# cluster centers -- a pixel sitting almost exactly on the boundary between
+# "hair" and "scalp" gets fully classified as scalp even though the color
+# evidence barely favors it, which is exactly the shape of a brightness
+# gradient across otherwise-uniform hair (subtly lighter near a light
+# source) rather than a real hair/scalp transition. This requires the
+# winning margin -- distance to the hair cluster minus distance to the
+# nearest non-hair cluster, in BGR color space (0-441 max) -- to clear this
+# floor before a pixel counts as scalp, not just win by any amount.
+# Measured 2026-08-17 against 6 real crown photos (same source as
+# CAPTURE_NOISE_FLOOR/BLUR_VARIANCE_MIN): the bottom ~10% of previously-
+# flagged pixels' margins sat at 24-56 (photo-dependent) vs medians of
+# 72-147 -- a threshold of 25 consistently trims 3-8 percentage points of
+# flagged area (the genuinely marginal tail) without meaningfully touching
+# the confident majority.
+SCALP_MARGIN_MIN = 25

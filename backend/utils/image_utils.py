@@ -3,7 +3,7 @@ import cv2
 import numpy as np
 from PIL import Image, ImageOps
 
-from .constants import MIN_ALIGN_MATCHES, ALIGN_CORRECTION_MIN_MATCHES, BLUR_VARIANCE_MIN
+from .constants import MIN_ALIGN_MATCHES, ALIGN_CORRECTION_MIN_MATCHES, BLUR_VARIANCE_MIN, SCALP_MARGIN_MIN
 
 
 def process_image(data: bytes, max_dim: int = 1600, quality: int = 82):
@@ -312,6 +312,16 @@ def mark_scalp_patches(image_bytes: bytes, max_dim: int = 800) -> "bytes | None"
        so a reflection doesn't get misread as scalp the way real exposed
        scalp would.
 
+    On top of that, the classification itself requires a SUBSTANTIAL margin,
+    not just any margin: k-means normally assigns every pixel to its nearest
+    of the 3 cluster centers, so a pixel sitting almost exactly on the
+    boundary between "hair" and "scalp" gets fully classified as scalp even
+    when the color evidence barely favors it -- exactly the shape of a
+    subtle brightness gradient across otherwise-uniform hair, not a real
+    hair/scalp transition. A pixel only counts as scalp if it's closer to a
+    non-hair cluster than to the hair cluster by more than SCALP_MARGIN_MIN
+    (see that constant's docstring for how it was calibrated).
+
     No background/ROI restriction: a face-based version was tried and
     removed for unreliably returning "face not found" on scalp photos; a
     GrabCut-based version (full-res, then a heavily downscaled variant) was
@@ -349,9 +359,18 @@ def mark_scalp_patches(image_bytes: bytes, max_dim: int = 800) -> "bytes | None"
         return None
     k = 3
     criteria = (cv2.TERM_CRITERIA_EPS + cv2.TERM_CRITERIA_MAX_ITER, 20, 0.5)
-    _, labels, centers = cv2.kmeans(pixels, k, None, criteria, 3, cv2.KMEANS_PP_CENTERS)
+    _, _, centers = cv2.kmeans(pixels, k, None, criteria, 3, cv2.KMEANS_PP_CENTERS)
     hair_cluster = int(np.argmin(centers.sum(axis=1)))
-    scalp_mask = (labels.reshape(h, w) != hair_cluster).astype(np.uint8) * 255
+    other_idxs = [i for i in range(k) if i != hair_cluster]
+
+    # Real per-pixel distances to every center, not just cv2.kmeans' own
+    # nearest-center labels -- needed to measure HOW MUCH closer a pixel is
+    # to a non-hair cluster than to hair, not just which one wins.
+    dists = np.stack([np.linalg.norm(pixels - centers[i], axis=1) for i in range(k)], axis=1)
+    dist_hair = dists[:, hair_cluster]
+    dist_nearest_other = np.min(dists[:, other_idxs], axis=1)
+    margin = dist_hair - dist_nearest_other
+    scalp_mask = (margin > SCALP_MARGIN_MIN).astype(np.uint8).reshape(h, w) * 255
 
     # Morphological open+close to clear speckle noise into coherent patches --
     # "patches" implies contiguous areas, not a salt-and-pepper pixel scatter.
