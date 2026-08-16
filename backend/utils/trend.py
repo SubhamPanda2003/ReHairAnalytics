@@ -15,9 +15,24 @@ def combined_noise_floor(capture_noise: float, measurement_spread) -> float:
     services.sessions.ensemble_score) -- via root-sum-square, the standard
     way to combine independent error terms. A plain sum would overstate the
     combined uncertainty; taking the max would understate it whenever both
-    sources genuinely contribute."""
-    m = measurement_spread if measurement_spread is not None else 0.0
-    return (capture_noise ** 2 + m ** 2) ** 0.5
+    sources genuinely contribute.
+
+    Both inputs arrive as max-min RANGES across repeated reads, not standard
+    deviations -- halved here before combining, so the result is a "+/-"
+    radius around a center value (what it's displayed as, and compared
+    against as, everywhere it's used: Report's "+/-X points" copy and
+    fit_trend's floor_se, which is compared directly against a real
+    standard error). Using the raw, unhalved range there would overstate
+    the actual "+/-" uncertainty by roughly 2x. This /2 is an approximation
+    -- a rigorous range-to-sigma conversion depends on how many samples the
+    range came from (control-chart theory: ~1.7x for 3 samples, ~2.5x for
+    6) -- but capture_noise is already a loose, small-sample estimate to
+    begin with, so a flat /2 is a reasonable simplification rather than a
+    per-N lookup table.
+    """
+    m = (measurement_spread if measurement_spread is not None else 0.0) / 2.0
+    c = capture_noise / 2.0
+    return (c ** 2 + m ** 2) ** 0.5
 
 
 def fit_trend(points: list[dict], value_key: str, noise_floor: float) -> dict:
