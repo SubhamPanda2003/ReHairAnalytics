@@ -15,27 +15,7 @@ logger = logging.getLogger(__name__)
 EMERGENT_LLM_KEY = os.environ.get("EMERGENT_LLM_KEY")
 
 
-def _few_shot_messages(system_message: str, few_shot: list) -> list:
-    """Turns a list of {"prompt": str, "image_b64": str, "expected": dict}
-    reference examples into a message history LlmChat will treat as prior
-    turns -- i.e. the model "sees" a worked example (photo in, correct-shape
-    JSON out) before the real question, anchoring it to concrete visual
-    reference points instead of only a text calibration description. Mirrors
-    the exact message shape the SDK's own _add_user_message() builds (text
-    and image as separate consecutive user-role entries) so this isn't a
-    different code path the API might handle differently."""
-    messages = [{"role": "system", "content": system_message}]
-    for ex in few_shot:
-        messages.append({"role": "user", "content": [{"type": "text", "text": ex["prompt"]}]})
-        mime = ImageContent.get_mime_type(ex["image_b64"])
-        messages.append({"role": "user", "content": [{"type": "image_url", "image_url": {"url": f"data:{mime};base64,{ex['image_b64']}"}}]})
-        messages.append({"role": "assistant", "content": json.dumps(ex["expected"])})
-    return messages
-
-
-def _new_chat(
-    session_id: str, system_message: str, temperature: float = None, json_mode: bool = False, few_shot: list = None,
-) -> LlmChat:
+def _new_chat(session_id: str, system_message: str, temperature: float = None, json_mode: bool = False) -> LlmChat:
     """`temperature` and `json_mode` go through with_params(), NOT
     with_model(**kwargs) -- with_model() only accepts (provider, model) in the
     installed SDK version, so the old `with_model(*MODEL, temperature=...)`
@@ -50,13 +30,7 @@ def _new_chat(
     found ~14% of analyze_metrics() calls returned a response the regex-based
     JSON extractor couldn't parse at all; this is the fix for that failure
     class specifically (a retry covers the rest -- see analyze_metrics)."""
-    if few_shot:
-        chat = LlmChat(
-            api_key=EMERGENT_LLM_KEY, session_id=session_id, system_message=system_message,
-            initial_messages=_few_shot_messages(system_message, few_shot),
-        )
-    else:
-        chat = LlmChat(api_key=EMERGENT_LLM_KEY, session_id=session_id, system_message=system_message)
+    chat = LlmChat(api_key=EMERGENT_LLM_KEY, session_id=session_id, system_message=system_message)
     chat.with_model(*MODEL)
     params = {}
     if temperature is not None:
@@ -147,16 +121,7 @@ def _is_inconsistent(result: dict) -> bool:
     return abs(d - c) > DENSITY_COVERAGE_DISAGREEMENT_THRESHOLD
 
 
-async def analyze_metrics(image_b64: str, view: str, session_id: str, region: str = "full", few_shot: list = None) -> dict:
-    """`few_shot`, if given, is a list of {"prompt": str, "image_b64": str,
-    "expected": dict} reference examples shown to the model as prior turns
-    before the real question -- see _few_shot_messages(). None (the default)
-    means every existing caller behaves exactly as before; nothing in the
-    live /scan path passes this today (see eval_scoring_calibration.py for
-    where it's actually exercised, and why it isn't wired into production
-    yet -- the reference images that make good few-shot anchors come from a
-    licensed dataset's free EVALUATION sample, not something cleared for
-    permanent use in a live production prompt)."""
+async def analyze_metrics(image_b64: str, view: str, session_id: str, region: str = "full") -> dict:
     include_hairline = region in HAIRLINE_VISIBLE_REGIONS
     system = (
         "You are an objective hair measurement assistant for standardized tracking photos. "
@@ -202,7 +167,7 @@ async def analyze_metrics(image_b64: str, view: str, session_id: str, region: st
         """One call + parse. Returns (result, was_empty) -- was_empty means
         the call succeeded but the response had no usable score fields at
         all (every field in `result` is therefore LLM_FAILURE_SENTINEL)."""
-        chat = _new_chat(attempt_session_id, system, temperature=temperature, json_mode=True, few_shot=few_shot)
+        chat = _new_chat(attempt_session_id, system, temperature=temperature, json_mode=True)
         msg = UserMessage(text=prompt, file_contents=[ImageContent(image_base64=image_b64)])
         resp = await chat.send_message(msg)
         data = _extract_json(resp)
