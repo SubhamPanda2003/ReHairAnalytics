@@ -5,6 +5,7 @@ import { fileUrl } from "@/lib/api";
 import useRegionCapture from "@/hooks/useRegionCapture";
 import { BURST_DURATION_S, BURST_KEEP } from "./constants";
 import Silhouette from "./Silhouette";
+import TiltIndicator from "./TiltIndicator";
 
 /** Full-screen burst-capture for a single region: auto-fires shots for
  * BURST_DURATION_S seconds and hands the sharpest BURST_KEEP back via
@@ -57,6 +58,7 @@ export default function RegionCaptureOverlay({ region, open, onClose, onCaptured
         </svg>
       </div>
 
+      <TiltIndicator active={open} light={screenLight} />
       <p className="text-xl sm:text-2xl font-heading font-bold text-center max-w-md" data-testid="capture-guide">{region.label}</p>
       <p className="text-sm text-muted-foreground text-center max-w-sm">{region.guide}</p>
       <p className="text-sm font-medium">{count} of ~{Math.round(BURST_DURATION_S * 1000 / 800)} photos · keeping the sharpest {BURST_KEEP}</p>

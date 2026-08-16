@@ -4,6 +4,7 @@ import { fileUrl } from "@/lib/api";
 import useAutoScan from "@/hooks/useAutoScan";
 import { REGIONS } from "./constants";
 import Silhouette from "./Silhouette";
+import TiltIndicator from "./TiltIndicator";
 
 export default function AutoScan({ precision = true, ghostPhotos }) {
   const {
@@ -89,6 +90,7 @@ export default function AutoScan({ precision = true, ghostPhotos }) {
 
           {phase === "scanning" ? (
             <>
+              <TiltIndicator active={phase === "scanning"} light={screenLight} />
               <p className="text-xl sm:text-2xl font-heading font-bold text-center max-w-md" data-testid="scan-guide">{guide}</p>
               <p className="text-sm font-medium">
                 {countdown != null ? `Get ready… ${countdown}` : `${count} photos · ${Math.round(progress)}%`}

@@ -7,6 +7,7 @@ from typing import List
 from fastapi import APIRouter, BackgroundTasks, File, Form, HTTPException, UploadFile
 
 from utils import config, image_utils
+from utils.constants import BLUR_VARIANCE_MIN
 from models.database import db
 from utils.deps import CurrentUser
 from models.schemas import SessionIn
@@ -146,8 +147,16 @@ async def upload_image(session_id: str, user: CurrentUser, file: UploadFile = Fi
 
     processed, ctype = await asyncio.to_thread(image_utils.process_image, raw)
     thumb = await asyncio.to_thread(image_utils.make_thumbnail, processed)
-    b64 = await asyncio.to_thread(image_utils.to_base64_jpeg, processed)
 
+    # Free, deterministic reject-gate before spending an LLM call to find out
+    # the same thing -- same threshold as the auto-scan path (see
+    # BLUR_VARIANCE_MIN's docstring). A decode failure here (bv is None)
+    # doesn't reject on its own; the LLM quality check right after still runs.
+    bv = await asyncio.to_thread(image_utils.blur_variance, processed)
+    if bv is not None and bv < BLUR_VARIANCE_MIN:
+        return {"rejected": True, "quality_score": 0, "issues": ["Photo is too blurry to measure reliably."], "retry": True}
+
+    b64 = await asyncio.to_thread(image_utils.to_base64_jpeg_for_scoring, processed)
     quality = await ai_service.analyze_quality(b64, view, session_id)
     if quality["quality"] < config.MIN_ACCEPTABLE_QUALITY:
         return {"rejected": True, "quality_score": quality["quality"], "issues": quality["issues"], "retry": True}
@@ -213,7 +222,7 @@ async def analyze_session(session_id: str, user: CurrentUser):
     # pick primary image: prefer top, then front
     primary = next((i for i in images if i["view"] == "top"), None) or next((i for i in images if i["view"] == "front"), None) or images[0]
     data, _ = await asyncio.to_thread(store.get_object, primary["storage_path"])
-    b64 = await asyncio.to_thread(image_utils.to_base64_jpeg, data)
+    b64 = await asyncio.to_thread(image_utils.to_base64_jpeg_for_scoring, data)
     first_call = await ai_service.analyze_metrics(b64, primary["view"], session_id)
     first_call["quality_score"] = first_call.pop("quality")
     metrics, spread = await sessions_service.ensemble_score(b64, primary["view"], "full", session_id, first_call)

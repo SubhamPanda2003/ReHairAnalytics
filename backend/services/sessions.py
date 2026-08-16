@@ -14,7 +14,7 @@ from models.database import db
 from utils import image_utils
 from utils.constants import (
     METRIC_KEYS, DELTA_KEYS, BLUR_QUALITY_MIN, ENSEMBLE_N, REGION_ORDER, BASELINE_BLEND_N, LLM_FAILURE_SENTINEL,
-    CAPTURE_NOISE_FLOOR,
+    CAPTURE_NOISE_FLOOR, BLUR_VARIANCE_MIN,
 )
 from utils.trend import combined_noise_floor, fit_trend
 
@@ -121,31 +121,33 @@ async def ensemble_score(b64: str, view: str, region: str, session_id: str, firs
     return merged, spread
 
 
-async def _previous_region_reference(previous: Optional[dict], region: str) -> tuple[Optional[str], Optional[dict]]:
-    """Same-region photo + score from the user's immediately-preceding
-    analyzed session, for ai_service.analyze_metrics's reference_b64/
-    reference_score -- lets a region's score stay calibrated to the same
-    numeric scale week over week instead of the model re-inventing its sense
-    of the scale from a blank slate every time. Returns (None, None) when
-    there's no previous session or it never scored this exact region -- must
-    never block scoring the current frame."""
+async def _previous_region_reference(previous: Optional[dict], region: str) -> tuple[Optional[bytes], Optional[dict]]:
+    """Same-region photo (raw bytes) + score from the user's immediately-
+    preceding analyzed session -- used both for ai_service.analyze_metrics's
+    reference_b64/reference_score (calibrating the numeric scale week over
+    week) and, when the match is confident enough, for aligning the current
+    photo's framing against it (see image_utils.align_to_reference) before
+    either gets scored. Returns raw bytes, not base64 -- callers decide when
+    to lighting-normalize/encode, since alignment needs to run on raw pixels
+    first. Returns (None, None) when there's no previous session or it never
+    scored this exact region -- must never block scoring the current frame.
+    """
     if not previous:
         return None, None
     score = (previous.get("per_region") or {}).get(region)
     if score is None:
         return None, None
-    image_b64 = None
+    image_bytes = None
     prev_session_id = previous.get("tracking_session_id")
     if prev_session_id:
         try:
             imgs = await db.images.find({"tracking_session_id": prev_session_id, "region": region}, {"_id": 0}).to_list(50)
             if imgs:
                 best = max(imgs, key=lambda i: (i.get("confidence", 0), i.get("quality_score", 0)))
-                data, _ = await asyncio.to_thread(store.get_object, best["storage_path"])
-                image_b64 = await asyncio.to_thread(image_utils.to_base64_jpeg, data)
+                image_bytes, _ = await asyncio.to_thread(store.get_object, best["storage_path"])
         except Exception:
-            image_b64 = None
-    return image_b64, score
+            image_bytes = None
+    return image_bytes, score
 
 
 async def _reference_scored_frame(storage_path: str, view: str, region: str, session_id: str, previous: Optional[dict]) -> Optional[dict]:
@@ -154,14 +156,24 @@ async def _reference_scored_frame(storage_path: str, view: str, region: str, ses
     Folded into the SAME median/average as that region's other reads rather
     than replacing them -- a reference-conditioned read is no longer a fully
     independent sample, so it should moderate the final score, not dictate it.
+
+    Before scoring, the current photo is aligned to the reference's framing
+    (image_utils.align_to_reference, falls back to the raw photo when the
+    match isn't confident) and both photos are lighting-normalized -- the
+    reference-scoring call site is a natural place for this since it's
+    already fetching both photos for comparison.
+
     Returns None (skip) when there's no usable previous reference or on any
     failure -- must never block finalizing the scan."""
-    ref_b64, ref_score = await _previous_region_reference(previous, region)
+    ref_bytes, ref_score = await _previous_region_reference(previous, region)
     if ref_score is None:
         return None
     try:
         data, _ = await asyncio.to_thread(store.get_object, storage_path)
-        b64 = await asyncio.to_thread(image_utils.to_base64_jpeg, data)
+        if ref_bytes is not None:
+            data, _aligned = await asyncio.to_thread(image_utils.align_to_reference, ref_bytes, data)
+        b64 = await asyncio.to_thread(image_utils.to_base64_jpeg_for_scoring, data)
+        ref_b64 = await asyncio.to_thread(image_utils.to_base64_jpeg_for_scoring, ref_bytes) if ref_bytes is not None else None
         result = await ai_service.analyze_metrics(
             b64, view, f"{session_id}-{region}-ref", region=region,
             reference_b64=ref_b64, reference_score=ref_score,
@@ -183,7 +195,7 @@ async def _ensemble_frame(frame: dict, session_id: str) -> tuple[dict, Optional[
     """
     try:
         data, _ = await asyncio.to_thread(store.get_object, frame["storage_path"])
-        b64 = await asyncio.to_thread(image_utils.to_base64_jpeg, data)
+        b64 = await asyncio.to_thread(image_utils.to_base64_jpeg_for_scoring, data)
     except Exception:
         return frame, None
     region = frame.get("region") or "full"
@@ -560,7 +572,7 @@ async def _compute_density_estimate(images: list[dict], session_id: str) -> Opti
         return None
     try:
         data, _ = await asyncio.to_thread(store.get_object, candidate["storage_path"])
-        b64 = await asyncio.to_thread(image_utils.to_base64_jpeg, data)
+        b64 = await asyncio.to_thread(image_utils.to_base64_jpeg_for_scoring, data)
         result = await ai_service.estimate_density_llm(b64, session_id)
     except Exception:
         return None
@@ -804,12 +816,27 @@ async def process_scan(user: dict, session_id: str, region: str, raw_frames: lis
     await db.tracking_sessions.update_one({"id": session_id}, {"$set": {"processing": True}})
     try:
         processed = []
+        too_blurry = []
         for raw, sub in raw_frames:
             try:
                 proc, _ = await asyncio.to_thread(image_utils.process_image, raw)
-                processed.append((proc, sub))
             except Exception:
                 continue
+            # Free, deterministic reject-gate for obviously-unusable frames --
+            # catches them before an API call is spent finding out. A frame
+            # whose blur can't even be measured (decode failure inside
+            # blur_variance) is treated as usable rather than silently
+            # dropped; only a REAL sub-threshold reading rejects it.
+            bv = await asyncio.to_thread(image_utils.blur_variance, proc)
+            if bv is not None and bv < BLUR_VARIANCE_MIN:
+                too_blurry.append((proc, sub))
+                continue
+            processed.append((proc, sub))
+        if not processed:
+            # Every frame was rejected as too blurry (or none decoded at all) --
+            # score what we have rather than losing the whole scan; a real,
+            # if blurry, reading beats no reading.
+            processed = too_blurry
         if not processed:
             logger.warning(f"process_scan: no valid frames for session {session_id}")
             return
@@ -818,7 +845,7 @@ async def process_scan(user: dict, session_id: str, region: str, raw_frames: lis
 
         async def analyze_one(i, proc, sub):
             async with sem:
-                b64 = await asyncio.to_thread(image_utils.to_base64_jpeg, proc)
+                b64 = await asyncio.to_thread(image_utils.to_base64_jpeg_for_scoring, proc)
                 m = await ai_service.analyze_metrics(b64, "scan", f"{session_id}-{i}", region=sub)
             return proc, sub, m
 

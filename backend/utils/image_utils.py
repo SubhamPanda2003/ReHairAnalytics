@@ -3,7 +3,7 @@ import cv2
 import numpy as np
 from PIL import Image, ImageOps
 
-from .constants import MIN_ALIGN_MATCHES
+from .constants import MIN_ALIGN_MATCHES, ALIGN_CORRECTION_MIN_MATCHES, BLUR_VARIANCE_MIN
 
 
 def process_image(data: bytes, max_dim: int = 1600, quality: int = 82):
@@ -49,9 +49,76 @@ def to_base64_jpeg(data: bytes) -> str:
     return base64.b64encode(out.getvalue()).decode()
 
 
+def to_base64_jpeg_for_scoring(data: bytes) -> str:
+    """Same as to_base64_jpeg, but lighting-normalized first (see
+    normalize_lighting). Use this specifically for photos being sent to the AI
+    for a MEASUREMENT call (analyze_metrics, estimate_density_llm) -- not for
+    descriptive-insight calls (generate_summary, generate_region_insights),
+    which should see the photo exactly as the user actually captured it, not
+    a normalized version. Falls back to the unnormalized bytes if CLAHE can't
+    decode them, rather than failing the whole scoring call over a
+    preprocessing step.
+    """
+    normalized = normalize_lighting(data)
+    return to_base64_jpeg(normalized if normalized is not None else data)
+
+
 def _decode_bgr(data: bytes):
     arr = np.frombuffer(data, dtype=np.uint8)
     return cv2.imdecode(arr, cv2.IMREAD_COLOR)
+
+
+def blur_variance(image_bytes: bytes, max_dim: int = 1024) -> "float | None":
+    """Variance of the Laplacian -- the standard deterministic sharpness proxy:
+    a blurry image has fewer sharp edges, so its second-derivative response is
+    both smaller and less varied. Free, instant, and consistent call to call,
+    unlike asking the LLM to judge blur (see analyze_quality) -- a real
+    reject-gate for obviously-unusable frames without spending an API call to
+    find out. Returns None if the photo can't be decoded.
+
+    Threshold calibration (BLUR_VARIANCE_MIN): measured 2026-08-16 against 15
+    real scalp photos (same source as CAPTURE_NOISE_FLOOR) -- sharp originals
+    scored 88-1109 (mean 490), a mild Gaussian blur (radius=1.2, matching
+    eval_noise_floor.py's "blur_mild" perturbation) scored 46-493, and a
+    clearly-unusable strong blur (radius=4) scored 6-35. There's a clean gap
+    between the strong-blur ceiling and the mild-blur floor -- a threshold in
+    that gap rejects genuinely broken frames without touching normal capture
+    softness. Resized to max_dim first so the score isn't just a proxy for
+    resolution -- a bigger photo has more pixels to compute gradients over
+    regardless of how sharp it actually is.
+    """
+    img = _decode_bgr(image_bytes)
+    if img is None:
+        return None
+    h, w = img.shape[:2]
+    scale = min(1.0, max_dim / max(h, w))
+    if scale < 1.0:
+        img = cv2.resize(img, (int(w * scale), int(h * scale)))
+    gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+    return float(cv2.Laplacian(gray, cv2.CV_64F).var())
+
+
+def normalize_lighting(image_bytes: bytes, quality: int = 85) -> "bytes | None":
+    """CLAHE (contrast-limited adaptive histogram equalization) on the
+    luminance channel only (LAB color space, so hue/saturation are untouched)
+    -- normalizes exposure/contrast differences between photos taken under
+    different lighting, one of the measured contributors to capture noise
+    (see CAPTURE_NOISE_FLOOR's docstring: +/-15% brightness was part of that
+    perturbation test). Only meant to be applied to the copy of a photo sent
+    to the AI for SCORING -- never to the stored/displayed photo, which stays
+    exactly what the user actually captured. Returns None if the photo can't
+    be decoded, rather than a fabricated image.
+    """
+    img = _decode_bgr(image_bytes)
+    if img is None:
+        return None
+    lab = cv2.cvtColor(img, cv2.COLOR_BGR2LAB)
+    l, a, b = cv2.split(lab)
+    clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
+    l = clahe.apply(l)
+    normalized = cv2.cvtColor(cv2.merge((l, a, b)), cv2.COLOR_LAB2BGR)
+    ok, buf = cv2.imencode(".jpg", normalized, [cv2.IMWRITE_JPEG_QUALITY, quality])
+    return buf.tobytes() if ok else None
 
 
 def _orb_matches(base_gray, cur_gray):
@@ -78,6 +145,58 @@ def _ransac_homography(kp1, kp2, good):
     dst_pts = np.float32([kp1[m.trainIdx].pt for m in good]).reshape(-1, 1, 2)
     homography, _ = cv2.findHomography(src_pts, dst_pts, cv2.RANSAC, 5.0)
     return homography
+
+
+def align_to_reference(reference_bytes: bytes, current_bytes: bytes, max_scale_shift_pct: float = 25.0) -> "tuple[bytes, bool]":
+    """Warp `current` onto the same framing as `reference` -- same ORB+homography
+    machinery as compare_photos, reused rather than duplicated. Targets the
+    single largest measured noise source (see CAPTURE_NOISE_FLOOR's docstring:
+    a 3-degree rotation alone swung one photo's score 30->65) by normalizing
+    framing BEFORE scoring, instead of only accounting for it statistically
+    after the fact.
+
+    Deliberately more conservative than compare_photos' "aligned" flag: needs
+    ALIGN_CORRECTION_MIN_MATCHES matched features (stricter than
+    MIN_ALIGN_MATCHES, which only gates a diff-heatmap/framing_note -- a
+    visual aid) AND a plausible implied scale change, since a bad warp here
+    corrupts what the AI actually scores, not just a comparison image. Falls
+    back to the ORIGINAL current_bytes, completely unchanged, whenever that
+    bar isn't cleared -- never guesses at a correction.
+
+    Returns (bytes, corrected). corrected=False means current_bytes came back
+    exactly as given (no reference, too few matches, decode failure, or an
+    implausible homography); corrected=True means the bytes are the warped
+    version, resized to match reference_bytes' dimensions.
+    """
+    ref = _decode_bgr(reference_bytes) if reference_bytes else None
+    cur = _decode_bgr(current_bytes)
+    if ref is None or cur is None:
+        return current_bytes, False
+
+    h, w = ref.shape[:2]
+    cur_resized = cv2.resize(cur, (w, h))
+    ref_gray = cv2.cvtColor(ref, cv2.COLOR_BGR2GRAY)
+    cur_gray = cv2.cvtColor(cur_resized, cv2.COLOR_BGR2GRAY)
+
+    kp1, kp2, good = _orb_matches(ref_gray, cur_gray)
+    if len(good) < ALIGN_CORRECTION_MIN_MATCHES:
+        return current_bytes, False
+    homography = _ransac_homography(kp1, kp2, good)
+    if homography is None:
+        return current_bytes, False
+
+    scale = float(np.sqrt(abs(np.linalg.det(homography[:2, :2]))))
+    if abs(scale - 1.0) * 100 > max_scale_shift_pct:
+        # An implausible implied zoom change usually means the matched
+        # features are a coincidental overlap, not a real correspondence --
+        # trust the raw photo over a warp built on a bad transform.
+        return current_bytes, False
+
+    warped = cv2.warpPerspective(cur_resized, homography, (w, h), borderMode=cv2.BORDER_REPLICATE)
+    ok, buf = cv2.imencode(".jpg", warped, [cv2.IMWRITE_JPEG_QUALITY, 90])
+    if not ok:
+        return current_bytes, False
+    return buf.tobytes(), True
 
 
 def compare_photos(baseline_bytes: bytes, current_bytes: bytes) -> dict:

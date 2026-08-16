@@ -111,3 +111,22 @@ CAPTURE_NOISE_FLOOR = 8
 
 # --- Image alignment (utils/image_utils.py) ---
 MIN_ALIGN_MATCHES = 10
+
+# Stricter than MIN_ALIGN_MATCHES on purpose: that constant only gates whether
+# a diff-heatmap/framing_note is trustworthy (a visual aid, low stakes if
+# wrong). This one gates whether image_utils.align_to_reference() actually
+# WARPS a photo before it's sent to the AI for scoring -- a bad correction
+# there corrupts the measurement itself, so it demands a much more confident
+# match before touching the photo at all.
+ALIGN_CORRECTION_MIN_MATCHES = 25
+
+# Laplacian-variance floor below which a captured frame is treated as too
+# blurry to score at all -- a free, deterministic reject-gate that doesn't
+# need an LLM call to find out. Measured 2026-08-16 against 15 real scalp
+# photos (same source as CAPTURE_NOISE_FLOOR): sharp originals scored
+# 88-1109 (mean 490); a mild blur (radius=1.2, matching
+# eval_noise_floor.py's "blur_mild" perturbation -- meant to represent normal
+# capture softness, not a reject case) scored 46-493; a clearly-unusable
+# strong blur (radius=4) scored 6-35. This sits in the gap between the
+# strong-blur ceiling and the mild-blur floor.
+BLUR_VARIANCE_MIN = 40
