@@ -70,7 +70,7 @@ export default function AutoScan({ precision = true, ghostPhotos }) {
                 alt=""
                 aria-hidden="true"
                 data-testid="ghost-overlay"
-                className="absolute inset-0 w-full h-full object-cover -scale-x-100 opacity-65 pointer-events-none"
+                className="absolute inset-0 w-full h-full object-cover -scale-x-100 opacity-80 pointer-events-none"
               />
             )}
             <Silhouette pose={pose} />
