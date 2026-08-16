@@ -46,6 +46,19 @@ def _avg_real(frames: list[dict], key: str) -> int:
     return int(round(sum(vals) / len(vals))) if vals else LLM_FAILURE_SENTINEL
 
 
+def _spread_to_confidence(spread: int) -> int:
+    """Derived reliability signal from ensemble spread (how much repeated
+    reads of the SAME photo disagree) instead of the model's own
+    self-reported confidence. A 42-photo real-Gemini test found self-reported
+    confidence clustered at 90/95/100 regardless of actual reliability -- it
+    didn't even drop on the one read with a wild internal density/coverage
+    disagreement (75 vs 15, confidence=95). Spread is an empirical
+    measurement, not a self-assessment, so it discriminates where
+    self-reported confidence doesn't -- though this specific linear mapping
+    is a reasonable starting point, not a fitted/validated curve."""
+    return max(0, min(100, round(100 - spread * 2.5)))
+
+
 async def ensemble_score(b64: str, view: str, region: str, session_id: str, first_call: dict) -> tuple[dict, Optional[int]]:
     """Re-analyze the same photo ENSEMBLE_N-1 more times and combine with an
     already-computed first result via per-metric median -- cancels out the
@@ -93,6 +106,7 @@ async def ensemble_score(b64: str, view: str, region: str, session_id: str, firs
 
     overall_vals = [s.get("overall_score", 0) for s in real_samples]
     spread = max(overall_vals) - min(overall_vals)
+    merged["confidence"] = _spread_to_confidence(spread)
     return merged, spread
 
 
@@ -563,6 +577,10 @@ async def finalize_day_analysis(user: dict, session_id: str, region: str, precis
         if len(overall_vals) >= 2:
             reg_metrics["spread"] = max(overall_vals) - min(overall_vals)
             region_spreads.append(reg_metrics["spread"])
+            # Same rationale as ensemble_score's override: measured spread
+            # across this region's own captured frames is a real reliability
+            # signal, self-reported confidence isn't.
+            reg_metrics["confidence"] = _spread_to_confidence(reg_metrics["spread"])
         region_storage_path[reg_key] = topn[0]["storage_path"]
         reg_metrics["scalp_map_path"] = await _generate_scalp_map(topn[0]["storage_path"], user["user_id"], session_id, reg_key)
         per_region[reg_key] = reg_metrics

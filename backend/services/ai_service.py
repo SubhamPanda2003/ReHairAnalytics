@@ -4,7 +4,10 @@ import re
 import logging
 from dotenv import load_dotenv
 from emergentintegrations.llm.chat import LlmChat, UserMessage, ImageContent
-from utils.constants import MODEL, MEASUREMENT_TEMPERATURE, REGION_FOCUS, HAIRLINE_VISIBLE_REGIONS, LLM_FAILURE_SENTINEL
+from utils.constants import (
+    MODEL, MEASUREMENT_TEMPERATURE, REGION_FOCUS, HAIRLINE_VISIBLE_REGIONS, LLM_FAILURE_SENTINEL,
+    DENSITY_COVERAGE_DISAGREEMENT_THRESHOLD,
+)
 
 load_dotenv()
 logger = logging.getLogger(__name__)
@@ -12,15 +15,59 @@ logger = logging.getLogger(__name__)
 EMERGENT_LLM_KEY = os.environ.get("EMERGENT_LLM_KEY")
 
 
-def _new_chat(session_id: str, system_message: str, temperature: float = None) -> LlmChat:
-    chat = LlmChat(api_key=EMERGENT_LLM_KEY, session_id=session_id, system_message=system_message)
-    if temperature is not None:
-        try:
-            chat.with_model(*MODEL, temperature=temperature)
-            return chat
-        except TypeError:
-            logger.warning("LlmChat.with_model() doesn't accept temperature in this SDK version; continuing without it.")
+def _few_shot_messages(system_message: str, few_shot: list) -> list:
+    """Turns a list of {"prompt": str, "image_b64": str, "expected": dict}
+    reference examples into a message history LlmChat will treat as prior
+    turns -- i.e. the model "sees" a worked example (photo in, correct-shape
+    JSON out) before the real question, anchoring it to concrete visual
+    reference points instead of only a text calibration description. Mirrors
+    the exact message shape the SDK's own _add_user_message() builds (text
+    and image as separate consecutive user-role entries) so this isn't a
+    different code path the API might handle differently."""
+    messages = [{"role": "system", "content": system_message}]
+    for ex in few_shot:
+        messages.append({"role": "user", "content": [{"type": "text", "text": ex["prompt"]}]})
+        mime = ImageContent.get_mime_type(ex["image_b64"])
+        messages.append({"role": "user", "content": [{"type": "image_url", "image_url": {"url": f"data:{mime};base64,{ex['image_b64']}"}}]})
+        messages.append({"role": "assistant", "content": json.dumps(ex["expected"])})
+    return messages
+
+
+def _new_chat(
+    session_id: str, system_message: str, temperature: float = None, json_mode: bool = False, few_shot: list = None,
+) -> LlmChat:
+    """`temperature` and `json_mode` go through with_params(), NOT
+    with_model(**kwargs) -- with_model() only accepts (provider, model) in the
+    installed SDK version, so the old `with_model(*MODEL, temperature=...)`
+    call always raised TypeError and silently fell back to the model's
+    default temperature on every single call. with_params() forwards
+    arbitrary kwargs straight to the underlying LiteLLM completion() call,
+    which is the SDK's real extension point for this.
+    json_mode sets response_format={"type": "json_object"}, which LiteLLM
+    translates into Gemini's native structured-JSON mode -- the API itself
+    then guarantees syntactically valid JSON instead of the model merely
+    being asked to produce it in free text. A 42-photo real-Gemini test
+    found ~14% of analyze_metrics() calls returned a response the regex-based
+    JSON extractor couldn't parse at all; this is the fix for that failure
+    class specifically (a retry covers the rest -- see analyze_metrics)."""
+    if few_shot:
+        chat = LlmChat(
+            api_key=EMERGENT_LLM_KEY, session_id=session_id, system_message=system_message,
+            initial_messages=_few_shot_messages(system_message, few_shot),
+        )
+    else:
+        chat = LlmChat(api_key=EMERGENT_LLM_KEY, session_id=session_id, system_message=system_message)
     chat.with_model(*MODEL)
+    params = {}
+    if temperature is not None:
+        params["temperature"] = temperature
+    if json_mode:
+        params["response_format"] = {"type": "json_object"}
+    if params:
+        try:
+            chat.with_params(**params)
+        except Exception:
+            logger.warning(f"LlmChat.with_params({list(params)}) not supported in this SDK version; continuing without it.")
     return chat
 
 
@@ -65,7 +112,7 @@ async def analyze_quality(image_b64: str, view: str, session_id: str) -> dict:
         "Set retry=true only if quality < 60. Keep issues concise (max 4)."
     )
     try:
-        chat = _new_chat(session_id, system, temperature=MEASUREMENT_TEMPERATURE)
+        chat = _new_chat(session_id, system, temperature=MEASUREMENT_TEMPERATURE, json_mode=True)
         msg = UserMessage(text=prompt, file_contents=[ImageContent(image_base64=image_b64)])
         resp = await chat.send_message(msg)
         data = _extract_json(resp)
@@ -80,7 +127,36 @@ async def analyze_quality(image_b64: str, view: str, session_id: str) -> dict:
         return {"quality": 72, "issues": ["Automated quality check unavailable; accepted with default score."], "retry": False}
 
 
-async def analyze_metrics(image_b64: str, view: str, session_id: str, region: str = "full") -> dict:
+def _failed_metrics(include_hairline: bool) -> dict:
+    return {
+        "hairline_score": LLM_FAILURE_SENTINEL if include_hairline else None,
+        "density_score": LLM_FAILURE_SENTINEL, "coverage_score": LLM_FAILURE_SENTINEL,
+        "overall_score": LLM_FAILURE_SENTINEL, "confidence": LLM_FAILURE_SENTINEL,
+        "quality": LLM_FAILURE_SENTINEL, "visible_scalp_pct": LLM_FAILURE_SENTINEL, "hair_coverage_pct": LLM_FAILURE_SENTINEL,
+    }
+
+
+def _is_inconsistent(result: dict) -> bool:
+    """A single call's density_score and coverage_score disagreeing wildly is
+    a signature of an unreliable read, not a genuine finding -- see
+    DENSITY_COVERAGE_DISAGREEMENT_THRESHOLD's docstring for the real example
+    that motivated this (75 vs 15 on the same photo, confidence=95)."""
+    d, c = result["density_score"], result["coverage_score"]
+    if d == LLM_FAILURE_SENTINEL or c == LLM_FAILURE_SENTINEL:
+        return False
+    return abs(d - c) > DENSITY_COVERAGE_DISAGREEMENT_THRESHOLD
+
+
+async def analyze_metrics(image_b64: str, view: str, session_id: str, region: str = "full", few_shot: list = None) -> dict:
+    """`few_shot`, if given, is a list of {"prompt": str, "image_b64": str,
+    "expected": dict} reference examples shown to the model as prior turns
+    before the real question -- see _few_shot_messages(). None (the default)
+    means every existing caller behaves exactly as before; nothing in the
+    live /scan path passes this today (see eval_scoring_calibration.py for
+    where it's actually exercised, and why it isn't wired into production
+    yet -- the reference images that make good few-shot anchors come from a
+    licensed dataset's free EVALUATION sample, not something cleared for
+    permanent use in a live production prompt)."""
     include_hairline = region in HAIRLINE_VISIBLE_REGIONS
     system = (
         "You are an objective hair measurement assistant for standardized tracking photos. "
@@ -121,12 +197,17 @@ async def analyze_metrics(image_b64: str, view: str, session_id: str, region: st
         + ("" if include_hairline else "This view does not show the frontal hairline -- do not estimate hairline_score. ")
         + f"Return strict JSON: {{{schema}}}."
     )
-    try:
-        chat = _new_chat(session_id, system, temperature=MEASUREMENT_TEMPERATURE)
+
+    async def _attempt(attempt_session_id: str, temperature: float) -> tuple[dict, bool]:
+        """One call + parse. Returns (result, was_empty) -- was_empty means
+        the call succeeded but the response had no usable score fields at
+        all (every field in `result` is therefore LLM_FAILURE_SENTINEL)."""
+        chat = _new_chat(attempt_session_id, system, temperature=temperature, json_mode=True, few_shot=few_shot)
         msg = UserMessage(text=prompt, file_contents=[ImageContent(image_base64=image_b64)])
         resp = await chat.send_message(msg)
         data = _extract_json(resp)
-        if not data.get("density_score") and not data.get("coverage_score"):
+        empty = not data.get("density_score") and not data.get("coverage_score")
+        if empty:
             # The call itself succeeded (no exception), but the response didn't
             # contain parseable/expected fields, so every score below silently
             # falls back to LLM_FAILURE_SENTINEL -- log the raw response here or
@@ -143,7 +224,7 @@ async def analyze_metrics(image_b64: str, view: str, session_id: str, region: st
         real_blend = [v for v in [density, coverage] + ([hairline] if include_hairline else []) if v != LLM_FAILURE_SENTINEL]
         overall_default = int(sum(real_blend) / len(real_blend)) if real_blend else LLM_FAILURE_SENTINEL
         overall = _clamp(data.get("overall_score"), default=overall_default)
-        return {
+        result = {
             "hairline_score": hairline,
             "density_score": density,
             "coverage_score": coverage,
@@ -153,14 +234,35 @@ async def analyze_metrics(image_b64: str, view: str, session_id: str, region: st
             "visible_scalp_pct": _clamp(data.get("visible_scalp_pct"), default=(100 - coverage) if coverage != LLM_FAILURE_SENTINEL else LLM_FAILURE_SENTINEL),
             "hair_coverage_pct": _clamp(data.get("hair_coverage_pct"), default=coverage),
         }
+        return result, empty
+
+    try:
+        result, empty = await _attempt(session_id, temperature=MEASUREMENT_TEMPERATURE)
+        inconsistent = _is_inconsistent(result)
+        if empty or inconsistent:
+            reason = "empty response" if empty else f"density/coverage disagree by {abs(result['density_score'] - result['coverage_score'])}"
+            logger.warning(f"analyze_metrics: retrying once for session {session_id} ({reason})")
+            # Retry at the model's DEFAULT (non-zero) temperature, not
+            # MEASUREMENT_TEMPERATURE=0.0 again -- an eval run found every
+            # single retry-on-empty-response case still came back empty,
+            # because temperature=0 is (near-)deterministic: identical image
+            # + identical prompt + identical temperature reliably reproduces
+            # the identical (bad) output. A genuinely different sample is the
+            # only thing a retry can offer here.
+            retry_result, retry_empty = await _attempt(f"{session_id}-retry", temperature=None)
+            if empty:
+                # Original was a total loss -- the retry can only help, even
+                # if it's imperfect (e.g. still inconsistent).
+                result = retry_result
+            elif not retry_empty and not _is_inconsistent(retry_result):
+                # Original had real (if disagreeing) numbers -- only replace
+                # them with a retry that's actually resolved, not another
+                # equally-unreliable read.
+                result = retry_result
+        return result
     except Exception as e:
         logger.error(f"analyze_metrics failed: {e}")
-        return {
-            "hairline_score": LLM_FAILURE_SENTINEL if include_hairline else None,
-            "density_score": LLM_FAILURE_SENTINEL, "coverage_score": LLM_FAILURE_SENTINEL,
-            "overall_score": LLM_FAILURE_SENTINEL, "confidence": LLM_FAILURE_SENTINEL,
-            "quality": LLM_FAILURE_SENTINEL, "visible_scalp_pct": LLM_FAILURE_SENTINEL, "hair_coverage_pct": LLM_FAILURE_SENTINEL,
-        }
+        return _failed_metrics(include_hairline)
 
 
 async def generate_summary(
@@ -304,7 +406,7 @@ async def generate_region_insights(regions: dict, session_id: str) -> dict:
     )
 
     try:
-        chat = _new_chat(f"{session_id}:region-insights", system)
+        chat = _new_chat(f"{session_id}:region-insights", system, json_mode=True)
         msg = UserMessage(text=prompt, file_contents=file_contents or None)
         resp = await chat.send_message(msg)
         data = _extract_json(resp)
@@ -342,7 +444,7 @@ async def estimate_density_llm(image_b64: str, session_id: str) -> dict:
         "Return strict JSON: {\"hairs_per_cm2\":int,\"confidence\":int,\"reasoning\":str}."
     )
     try:
-        chat = _new_chat(f"{session_id}:density-llm-guess", system, temperature=MEASUREMENT_TEMPERATURE)
+        chat = _new_chat(f"{session_id}:density-llm-guess", system, temperature=MEASUREMENT_TEMPERATURE, json_mode=True)
         msg = UserMessage(text=prompt, file_contents=[ImageContent(image_base64=image_b64)])
         resp = await chat.send_message(msg)
         data = _extract_json(resp)

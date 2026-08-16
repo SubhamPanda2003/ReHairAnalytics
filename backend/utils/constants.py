@@ -44,6 +44,15 @@ HAIRLINE_VISIBLE_REGIONS = {"full", "front", "hairline", "left", "right"}
 # (real data should always be preferred over a known-failed reading).
 LLM_FAILURE_SENTINEL = -1
 
+# A single call's density_score and coverage_score disagreeing by more than
+# this is treated as an unreliable read worth retrying once, not a genuine
+# finding -- found via a 42-photo real-Gemini test where one read came back
+# density=75/coverage=15 (same photo) with confidence=95, i.e. the model's
+# own confidence didn't flag it. Set well above normal legitimate spread
+# (diffuse thinning can genuinely show moderately different density vs
+# coverage) so this only catches the wild, clearly-wrong cases.
+DENSITY_COVERAGE_DISAGREEMENT_THRESHOLD = 40
+
 # --- Scoring / ensembling (services/sessions.py) ---
 
 # hairline_score is handled separately from the other metrics: it's only ever

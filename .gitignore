@@ -78,6 +78,10 @@ agenthub/agents/youtube/db
 
 memory/test_credentials.md
 
+# Local-only labeled photo sets for backend/tests/eval_scoring_calibration.py --
+# never committed (licensed-for-evaluation-only datasets, not repo content).
+backend/tests/calibration_data/
+
 # Mobile development
 android-sdk/frontend/node_modules/.cache/default-development/6.pack
 frontend/node_modules/.cache/default-development/7.pack
