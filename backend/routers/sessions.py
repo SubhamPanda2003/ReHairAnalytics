@@ -31,13 +31,7 @@ async def list_sessions(user: CurrentUser):
 async def get_last_photos(user: CurrentUser):
     """Best photo per region from the user's most recent scan, so a new
     capture can overlay a translucent ghost of it for pose alignment."""
-    last = await db.tracking_sessions.find({"user_id": user["user_id"]}, {"_id": 0}).sort("date", -1).to_list(1)
-    if not last:
-        return {"session_id": None, "photos": {}}
-    session_id = last[0]["id"]
-    imgs = await db.images.find({"tracking_session_id": session_id, "user_id": user["user_id"]}, {"_id": 0}).to_list(200)
-    by_region = sessions_service.best_per_region(imgs)
-    photos = {region: img["thumb_path"] for region, img in by_region.items()}
+    session_id, photos = await sessions_service.latest_photos_by_region(user["user_id"])
     return {"session_id": session_id, "photos": photos}
 
 

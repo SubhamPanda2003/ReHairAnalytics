@@ -1,14 +1,16 @@
 import React, { useState, useEffect } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { api } from "@/lib/api";
+import { api, fileUrl } from "@/lib/api";
+import { fmtScore } from "@/lib/scores";
 import { useAuth } from "@/context/AuthContext";
 import Navbar from "@/components/Navbar";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { toast } from "sonner";
-import { Stethoscope, Clock, Check, X, Video, Loader2, Hourglass, BadgeCheck } from "lucide-react";
+import { Stethoscope, Clock, Check, X, Video, Loader2, Hourglass, BadgeCheck, History, ImageOff } from "lucide-react";
 
 const empty = { name: "", specialty: "", years_experience: "", bio: "", photo: "", meeting_link: "", price: "" };
 
@@ -22,6 +24,13 @@ export default function DermPractice() {
   const { data: profile, isLoading } = useQuery({ queryKey: ["derm-me"], queryFn: async () => (await api.get("/derm/me")).data });
   const { data: appts } = useQuery({ queryKey: ["appointments"], queryFn: async () => (await api.get("/appointments")).data });
   const incoming = appts?.as_dermatologist || [];
+
+  const [historyApptId, setHistoryApptId] = useState(null);
+  const { data: history, isLoading: historyLoading } = useQuery({
+    queryKey: ["appointment-history", historyApptId],
+    queryFn: async () => (await api.get(`/appointments/${historyApptId}/history`)).data,
+    enabled: !!historyApptId,
+  });
 
   const hasProfile = profile && profile.name;
 
@@ -121,14 +130,23 @@ export default function DermPractice() {
                           <p className="text-xs text-muted-foreground flex items-center gap-1"><Clock className="w-3.5 h-3.5" /> {new Date(a.requested_time).toLocaleString()}</p>
                           {a.note && <p className="text-sm text-muted-foreground mt-1">“{a.note}”</p>}
                         </div>
-                        <div className="flex items-center gap-2">
+                        <div className="flex items-center gap-2 flex-wrap">
                           {a.status === "requested" ? (
                             <>
                               <Button size="sm" className="rounded-full" onClick={() => act(a.id, "confirm")} data-testid={`confirm-${a.id}`}><Check className="w-4 h-4 mr-1" /> Confirm</Button>
                               <Button size="sm" variant="outline" className="rounded-full" onClick={() => act(a.id, "decline")} data-testid={`decline-${a.id}`}><X className="w-4 h-4 mr-1" /> Decline</Button>
                             </>
                           ) : a.status === "confirmed" ? (
-                            <a href={a.meeting_link} target="_blank" rel="noreferrer"><Button size="sm" variant="outline" className="rounded-full"><Video className="w-4 h-4 mr-1" /> Meet link</Button></a>
+                            <>
+                              {a.share_history ? (
+                                <Button size="sm" variant="outline" className="rounded-full" onClick={() => setHistoryApptId(a.id)} data-testid={`view-history-${a.id}`}>
+                                  <History className="w-4 h-4 mr-1" /> View history
+                                </Button>
+                              ) : (
+                                <span className="text-xs text-muted-foreground">Patient hasn't shared their history</span>
+                              )}
+                              <a href={a.meeting_link} target="_blank" rel="noreferrer"><Button size="sm" variant="outline" className="rounded-full"><Video className="w-4 h-4 mr-1" /> Meet link</Button></a>
+                            </>
                           ) : <span className="text-xs text-muted-foreground capitalize">{a.status}</span>}
                         </div>
                       </div>
@@ -140,6 +158,57 @@ export default function DermPractice() {
           </>
         )}
       </main>
+
+      <Dialog open={!!historyApptId} onOpenChange={(o) => !o && setHistoryApptId(null)}>
+        <DialogContent className="rounded-3xl max-w-lg" data-testid="patient-history-dialog">
+          <DialogHeader><DialogTitle className="font-heading">Shared history{history?.patient_name ? ` — ${history.patient_name}` : ""}</DialogTitle></DialogHeader>
+          {historyLoading ? (
+            <div className="flex justify-center py-12"><Loader2 className="w-6 h-6 animate-spin text-primary" /></div>
+          ) : history ? (
+            <div className="space-y-5">
+              <p className="text-sm text-muted-foreground -mt-2">{history.patient_email}</p>
+
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                {[
+                  ["Overall", history.progress?.latest?.overall],
+                  ["Density", history.progress?.latest?.density],
+                  ["Coverage", history.progress?.latest?.coverage],
+                  ["Hairline", history.progress?.latest?.hairline],
+                ].map(([label, val]) => (
+                  <div key={label} className="rounded-xl border border-border bg-secondary/40 p-3 text-center">
+                    <p className="text-xs uppercase tracking-wider text-muted-foreground">{label}</p>
+                    <p className="font-heading text-xl font-bold mt-0.5">{fmtScore(val)}</p>
+                  </div>
+                ))}
+              </div>
+
+              <div className="flex flex-wrap items-center gap-x-5 gap-y-1 text-sm text-muted-foreground">
+                <span>{history.progress?.streak ?? 0} scan{history.progress?.streak === 1 ? "" : "s"} logged</span>
+                {history.progress?.days_since_last != null && <span>Last scan {history.progress.days_since_last === 0 ? "today" : `${history.progress.days_since_last}d ago`}</span>}
+                {history.progress?.estimated_progress?.overall != null && (
+                  <span>Overall {history.progress.estimated_progress.overall >= 0 ? "+" : ""}{history.progress.estimated_progress.overall} vs baseline</span>
+                )}
+              </div>
+
+              <div>
+                <p className="text-xs uppercase tracking-wider text-muted-foreground mb-2">Most recent photos</p>
+                {Object.keys(history.recent_photos || {}).length === 0 ? (
+                  <p className="text-sm text-muted-foreground flex items-center gap-1.5"><ImageOff className="w-4 h-4" /> No photos yet</p>
+                ) : (
+                  <div className="grid grid-cols-3 gap-2">
+                    {Object.entries(history.recent_photos).map(([region, path]) => (
+                      <div key={region} className="rounded-xl overflow-hidden border border-border aspect-square relative" data-testid={`history-photo-${region}`}>
+                        <img src={fileUrl(path)} alt={region} className="w-full h-full object-cover" />
+                        <span className="absolute bottom-1 left-1 text-[10px] font-medium px-1.5 py-0.5 rounded-full bg-black/60 text-white capitalize">{region}</span>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </div>
+          ) : null}
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

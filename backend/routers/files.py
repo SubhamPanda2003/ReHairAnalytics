@@ -26,7 +26,18 @@ async def download_file(
         raise HTTPException(status_code=401, detail="Not authenticated")
     record = await db.images.find_one({"$or": [{"storage_path": path}, {"thumb_path": path}]}, {"_id": 0})
     if record and record.get("user_id") != user["user_id"]:
-        raise HTTPException(status_code=404, detail="File not found")
+        # Not the photo's owner -- still allow it if the requester is a
+        # dermatologist the owner has an active, confirmed appointment with
+        # AND has opted in to share their history for (see appointments.py's
+        # /share, /unshare, /history). Anyone else still 404s.
+        shared = await db.appointments.find_one({
+            "dermatologist_id": user["user_id"],
+            "patient_id": record["user_id"],
+            "status": "confirmed",
+            "share_history": True,
+        }, {"_id": 0})
+        if not shared:
+            raise HTTPException(status_code=404, detail="File not found")
     if not record:
         # Derived images (e.g. change-map heatmaps, scalp maps) intentionally
         # aren't rows in db.images -- they're not captured photos, so they

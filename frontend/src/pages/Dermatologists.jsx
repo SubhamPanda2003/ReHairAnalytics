@@ -11,9 +11,10 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Badge } from "@/components/ui/badge";
+import { Checkbox } from "@/components/ui/checkbox";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { toast } from "sonner";
-import { Stethoscope, Video, Clock, BadgeCheck, Loader2, CalendarPlus, ExternalLink, UserPlus } from "lucide-react";
+import { Stethoscope, Video, Clock, BadgeCheck, Loader2, CalendarPlus, ExternalLink, UserPlus, Share2, ShieldOff } from "lucide-react";
 
 const APPOINTMENT_STATUS_LABELS = {
   requested: ["Requested", "bg-amber-500/15 text-amber-600"],
@@ -29,7 +30,9 @@ export default function Dermatologists() {
   const [selected, setSelected] = useState(null);
   const [when, setWhen] = useState("");
   const [note, setNote] = useState("");
+  const [shareHistory, setShareHistory] = useState(false);
   const [submitting, setSubmitting] = useState(false);
+  const [sharingId, setSharingId] = useState(null);
 
   const { data: derms, isLoading } = useQuery({ queryKey: ["dermatologists"], queryFn: async () => (await api.get("/dermatologists")).data });
   const { data: appts } = useQuery({ queryKey: ["appointments"], queryFn: async () => (await api.get("/appointments")).data });
@@ -39,12 +42,22 @@ export default function Dermatologists() {
     if (!when) { toast.error("Pick a date & time"); return; }
     setSubmitting(true);
     try {
-      await api.post("/appointments", { dermatologist_id: selected.user_id, requested_time: when, note });
+      await api.post("/appointments", { dermatologist_id: selected.user_id, requested_time: when, note, share_history: shareHistory });
       toast.success("Request sent");
-      setSelected(null); setWhen(""); setNote("");
+      setSelected(null); setWhen(""); setNote(""); setShareHistory(false);
       qc.invalidateQueries({ queryKey: ["appointments"] });
     } catch (e) { toast.error(e.response?.data?.detail || "Could not request"); }
     setSubmitting(false);
+  };
+
+  const toggleShare = async (appt) => {
+    setSharingId(appt.id);
+    try {
+      await api.post(`/appointments/${appt.id}/${appt.share_history ? "unshare" : "share"}`);
+      toast.success(appt.share_history ? "Stopped sharing your history" : "Your scan history is now shared for this appointment");
+      qc.invalidateQueries({ queryKey: ["appointments"] });
+    } catch (e) { toast.error("Could not update sharing"); }
+    setSharingId(null);
   };
 
   const isDerm = user?.role === "dermatologist";
@@ -109,8 +122,17 @@ export default function Dermatologists() {
                   <p className="font-medium">{a.derm_name}</p>
                   <p className="text-xs text-muted-foreground flex items-center gap-1"><Clock className="w-3.5 h-3.5" /> {new Date(a.requested_time).toLocaleString()}</p>
                 </div>
-                <div className="flex items-center gap-3">
+                <div className="flex items-center gap-3 flex-wrap">
                   <StatusPill value={a.status} labels={APPOINTMENT_STATUS_LABELS} />
+                  {["requested", "confirmed"].includes(a.status) && (
+                    <Button
+                      size="sm" variant={a.share_history ? "secondary" : "outline"} className="rounded-full"
+                      disabled={sharingId === a.id} onClick={() => toggleShare(a)} data-testid={`toggle-share-${a.id}`}
+                    >
+                      {sharingId === a.id ? <Loader2 className="w-3.5 h-3.5 mr-1.5 animate-spin" /> : a.share_history ? <ShieldOff className="w-3.5 h-3.5 mr-1.5" /> : <Share2 className="w-3.5 h-3.5 mr-1.5" />}
+                      {a.share_history ? "Stop sharing history" : "Share history"}
+                    </Button>
+                  )}
                   {a.status === "confirmed" && a.meeting_link && (
                     <a href={a.meeting_link} target="_blank" rel="noreferrer" data-testid={`join-${a.id}`}>
                       <Button size="sm" className="rounded-full"><Video className="w-4 h-4 mr-1.5" /> Join <ExternalLink className="w-3.5 h-3.5 ml-1" /></Button>
@@ -135,6 +157,13 @@ export default function Dermatologists() {
               <Label className="text-xs uppercase tracking-wider text-muted-foreground">Note (optional)</Label>
               <Textarea value={note} onChange={(e) => setNote(e.target.value)} placeholder="What would you like to discuss?" className="mt-1.5 rounded-xl" data-testid="appt-note" />
             </div>
+            <label className="flex items-start gap-2.5 rounded-xl border border-border p-3 cursor-pointer" data-testid="appt-share-history-label">
+              <Checkbox checked={shareHistory} onCheckedChange={(v) => setShareHistory(!!v)} className="mt-0.5" data-testid="appt-share-history" />
+              <span className="text-sm">
+                <span className="font-medium">Share my scan history with this dermatologist</span>
+                <span className="block text-xs text-muted-foreground mt-0.5">They'll see your score trend and recent photos once the appointment is confirmed — only for this appointment, and you can turn it off anytime.</span>
+              </span>
+            </label>
           </div>
           <DialogFooter>
             <Button onClick={request} disabled={submitting} className="rounded-full w-full" data-testid="appt-submit">

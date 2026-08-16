@@ -35,6 +35,7 @@ class AppointmentIn(BaseModel):
     dermatologist_id: str
     requested_time: str
     note: Optional[str] = ""
+    share_history: Optional[bool] = False
 
 
 class RoleIn(BaseModel):
