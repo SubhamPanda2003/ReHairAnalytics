@@ -106,7 +106,7 @@ BASELINE_BLEND_N = 3
 # this app would previously have called a "trend" are within noise.
 # TODO: re-measure (bigger sample) and update after any capture-flow,
 # calibration prompt, or model change -- it will drift out of date otherwise.
-CAPTURE_NOISE_FLOOR = 17
+CAPTURE_NOISE_FLOOR = 4
 
 
 # --- Image alignment (utils/image_utils.py) ---
