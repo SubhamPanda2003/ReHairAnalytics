@@ -22,13 +22,23 @@ logger = logging.getLogger(__name__)
 
 
 def _avg_hairline(frames: list[dict]):
-    """Average hairline_score across only the frames that have a REAL one --
-    excludes both None (hairline not applicable to that frame's region, e.g.
-    crown/back) and LLM_FAILURE_SENTINEL (hairline WAS expected but the call
-    failed) -- those are different things, but neither is a number to average
-    in. Returns None if no frame has a real reading."""
-    vals = [v for v in (f.get("hairline_score") for f in frames) if v is not None and v != LLM_FAILURE_SENTINEL]
-    return int(round(sum(vals) / len(vals))) if vals else None
+    """Average hairline_score across frames where it's APPLICABLE (not None,
+    e.g. excludes crown/back frames) -- distinct from whether it's a real
+    reading. Real (non-sentinel) values are preferred and averaged together;
+    only when hairline was applicable everywhere it appears but every single
+    one of those calls failed does this return LLM_FAILURE_SENTINEL itself,
+    so a genuine failure stays a visible -1 instead of silently collapsing
+    into the same None used for "not applicable at all" -- a region-winning
+    frame whose hairline call failed must still show up as a failure, not
+    quietly vanish as if hairline weren't in frame. Returns None only when
+    no frame in the list says hairline is applicable to begin with."""
+    applicable = [v for v in (f.get("hairline_score") for f in frames) if v is not None]
+    if not applicable:
+        return None
+    real = [v for v in applicable if v != LLM_FAILURE_SENTINEL]
+    if not real:
+        return LLM_FAILURE_SENTINEL
+    return int(round(sum(real) / len(real)))
 
 
 def _median(vals: list):
@@ -109,6 +119,60 @@ async def ensemble_score(b64: str, view: str, region: str, session_id: str, firs
     spread = max(overall_vals) - min(overall_vals)
     merged["confidence"] = _spread_to_confidence(spread)
     return merged, spread
+
+
+async def _previous_region_reference(previous: Optional[dict], region: str) -> tuple[Optional[str], Optional[dict]]:
+    """Same-region photo + score from the user's immediately-preceding
+    analyzed session, for ai_service.analyze_metrics's reference_b64/
+    reference_score -- lets a region's score stay calibrated to the same
+    numeric scale week over week instead of the model re-inventing its sense
+    of the scale from a blank slate every time. Returns (None, None) when
+    there's no previous session or it never scored this exact region -- must
+    never block scoring the current frame."""
+    if not previous:
+        return None, None
+    score = (previous.get("per_region") or {}).get(region)
+    if score is None:
+        return None, None
+    image_b64 = None
+    prev_session_id = previous.get("tracking_session_id")
+    if prev_session_id:
+        try:
+            imgs = await db.images.find({"tracking_session_id": prev_session_id, "region": region}, {"_id": 0}).to_list(50)
+            if imgs:
+                best = max(imgs, key=lambda i: (i.get("confidence", 0), i.get("quality_score", 0)))
+                data, _ = await asyncio.to_thread(store.get_object, best["storage_path"])
+                image_b64 = await asyncio.to_thread(image_utils.to_base64_jpeg, data)
+        except Exception:
+            image_b64 = None
+    return image_b64, score
+
+
+async def _reference_scored_frame(storage_path: str, view: str, region: str, session_id: str, previous: Optional[dict]) -> Optional[dict]:
+    """One extra analyze_metrics() read of a region's winning photo, given the
+    previous session's same-region photo+score as a calibration reference.
+    Folded into the SAME median/average as that region's other reads rather
+    than replacing them -- a reference-conditioned read is no longer a fully
+    independent sample, so it should moderate the final score, not dictate it.
+    Returns None (skip) when there's no usable previous reference or on any
+    failure -- must never block finalizing the scan."""
+    ref_b64, ref_score = await _previous_region_reference(previous, region)
+    if ref_score is None:
+        return None
+    try:
+        data, _ = await asyncio.to_thread(store.get_object, storage_path)
+        b64 = await asyncio.to_thread(image_utils.to_base64_jpeg, data)
+        result = await ai_service.analyze_metrics(
+            b64, view, f"{session_id}-{region}-ref", region=region,
+            reference_b64=ref_b64, reference_score=ref_score,
+        )
+    except Exception:
+        return None
+    if result.get("overall_score") == LLM_FAILURE_SENTINEL:
+        return None
+    result = dict(result)
+    result["quality_score"] = result.pop("quality", result.get("quality_score", 0))
+    return result
 
 
 async def _ensemble_frame(frame: dict, session_id: str) -> tuple[dict, Optional[int]]:
@@ -555,11 +619,15 @@ async def _region_insights(
 
 async def finalize_day_analysis(user: dict, session_id: str, region: str, precision: bool = False) -> dict:
     """Aggregate every analyzed frame captured today into a single analysis
-    document. `precision` gates the ensemble re-analysis step below (see
-    _ensemble_frame/ensemble_score) -- on, each region's winning frame gets
-    re-read ENSEMBLE_N-1 more times and the results combined to cancel out
-    per-call scoring noise; off, it's scored from the single existing read,
-    which is faster and cheaper but more exposed to a given call's noise.
+    document. `precision` gates two extra-cost reliability steps, both applied
+    only to the single winning frame per region (not every captured frame):
+    ensemble re-analysis (see _ensemble_frame/ensemble_score) re-reads that
+    frame ENSEMBLE_N-1 more times to cancel out per-call sampling noise, and
+    reference-scored re-analysis (see _reference_scored_frame) reads it once
+    more against the user's previous scan of that same region, to keep the
+    numeric scale calibrated week over week. Off, a region is scored from its
+    single existing read, which is faster and cheaper but more exposed to
+    both kinds of noise.
     """
     frames = await db.images.find(
         {"tracking_session_id": session_id, "confidence": {"$exists": True}}, {"_id": 0}
@@ -576,6 +644,11 @@ async def finalize_day_analysis(user: dict, session_id: str, region: str, precis
         if f.get("quality_score", 0) >= BLUR_QUALITY_MIN or f.get("quality_score") == LLM_FAILURE_SENTINEL
     ] or frames
 
+    # Needed per-region below (to fetch each region's previous photo+score as a
+    # calibration reference), not just for the top-level deltas at the end --
+    # moved up from its old call site right before the doc is built.
+    baseline, previous = await get_baseline_and_previous(user["user_id"], session_id)
+
     # Group usable frames by their captured (sub-)region.
     by_region: dict[str, list[dict]] = {}
     for f in usable:
@@ -590,6 +663,15 @@ async def finalize_day_analysis(user: dict, session_id: str, region: str, precis
         only = sorted(only, key=lambda x: x.get("confidence", 0), reverse=True)
         topn = only[: min(4, len(only))]
         reg_key = list(by_region.keys())[0] if by_region else region
+        if precision:
+            # One extra read of the winning frame, calibrated against this
+            # region's previous photo+score (see _reference_scored_frame) --
+            # folded in alongside the other frames rather than replacing them.
+            ref_frame = await _reference_scored_frame(
+                topn[0]["storage_path"], topn[0].get("view") or "scan", reg_key, session_id, previous,
+            )
+            if ref_frame:
+                topn = topn + [ref_frame]
         reg_metrics = {k: _avg_real(topn, k) for k in METRIC_KEYS}
         hairline = _avg_hairline(topn)
         if hairline is not None:
@@ -617,10 +699,17 @@ async def finalize_day_analysis(user: dict, session_id: str, region: str, precis
         for reg, fl in by_region.items():
             best = max(fl, key=lambda x: x.get("confidence", 0))
             ensembled, spread = await _ensemble_frame(best, session_id) if precision else (best, None)
-            topn.append(ensembled)
-            reg_metrics = {k: ensembled.get(k, 0) for k in METRIC_KEYS}
-            if ensembled.get("hairline_score") is not None:
-                reg_metrics["hairline_score"] = ensembled["hairline_score"]
+            ref_frame = await _reference_scored_frame(
+                best["storage_path"], best.get("view") or "scan", reg, session_id, previous,
+            ) if precision else None
+            frames_for_region = [ensembled] + ([ref_frame] if ref_frame else [])
+            reg_metrics = {k: _avg_real(frames_for_region, k) for k in METRIC_KEYS}
+            hairline = _avg_hairline(frames_for_region)
+            if hairline is not None:
+                reg_metrics["hairline_score"] = hairline
+            representative = dict(ensembled)
+            representative.update(reg_metrics)
+            topn.append(representative)
             if spread is not None:
                 reg_metrics["spread"] = spread
                 region_spreads.append(spread)
@@ -646,7 +735,6 @@ async def finalize_day_analysis(user: dict, session_id: str, region: str, precis
         "hair_coverage_pct": avg("hair_coverage_pct"),
     }
 
-    baseline, previous = await get_baseline_and_previous(user["user_id"], session_id)
     current_best = await best_image_path(session_id)
     visual = await compute_visual_context(user["user_id"], session_id, current_best)
     summary = await ai_service.generate_summary(

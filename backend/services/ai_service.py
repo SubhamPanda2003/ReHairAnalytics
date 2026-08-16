@@ -121,7 +121,18 @@ def _is_inconsistent(result: dict) -> bool:
     return abs(d - c) > DENSITY_COVERAGE_DISAGREEMENT_THRESHOLD
 
 
-async def analyze_metrics(image_b64: str, view: str, session_id: str, region: str = "full") -> dict:
+async def analyze_metrics(
+    image_b64: str, view: str, session_id: str, region: str = "full",
+    reference_b64: str = None, reference_score: dict = None,
+) -> dict:
+    """`reference_b64`/`reference_score` are the SAME region's photo+scores from
+    the user's previous scan, when a caller has one (see
+    services.sessions._reference_scored_frame). Passed through as a second
+    image plus a calibration note, NOT a target to match -- the prompt
+    explicitly tells the model to keep its numeric scale consistent against
+    the reference, not to assume the new photo looks the same, because an
+    anchor the model is free to just copy would collapse week-to-week
+    variation instead of measuring it."""
     include_hairline = region in HAIRLINE_VISIBLE_REGIONS
     system = (
         "You are an objective hair measurement assistant for standardized tracking photos. "
@@ -152,6 +163,30 @@ async def analyze_metrics(image_b64: str, view: str, session_id: str, region: st
             "recession; 45-60=mild-to-moderate recession or temple thinning; 65-80=minor recession, close to a "
             "youthful line; 85-100=full, low, straight hairline with no recession. "
         )
+    reference_section = ""
+    if reference_b64 or reference_score:
+        score_bits = []
+        if reference_score:
+            ref_keys = [("density", "density_score"), ("coverage", "coverage_score"), ("overall", "overall_score")]
+            if include_hairline:
+                ref_keys.append(("hairline", "hairline_score"))
+            for label, key in ref_keys:
+                v = reference_score.get(key)
+                if v is not None and v != LLM_FAILURE_SENTINEL:
+                    score_bits.append(f"{label}={v}")
+        ref_notes = []
+        if score_bits:
+            ref_notes.append(f"its previous scores were {{{', '.join(score_bits)}}}")
+        if reference_b64:
+            ref_notes.append("the additional image provided is that same earlier photo of this region")
+        if ref_notes:
+            reference_section = (
+                f" This region was scanned before -- {' and '.join(ref_notes)}. "
+                "Use this ONLY to keep your numeric scale consistent across sessions (so a given score means "
+                "the same thing this time as it did before) -- do NOT assume the new photo looks the same. "
+                "Independently judge what is actually visible in the CURRENT photo; if it looks meaningfully "
+                "different from the reference, your score must reflect that difference, not match the old one. "
+            )
     prompt = (
         f"Analyze this hair/scalp photo (view='{view}', focus region='{region}'). {focus} "
         f"Estimate objective visible metrics on a 0-100 scale: {metrics_list}"
@@ -159,6 +194,7 @@ async def analyze_metrics(image_b64: str, view: str, session_id: str, region: st
         "focus region (low if blurry, off-angle, too far, or the region is not clearly visible). Also give "
         "quality (0-100) for photographic usability. "
         + calibration
+        + reference_section
         + ("" if include_hairline else "This view does not show the frontal hairline -- do not estimate hairline_score. ")
         + f"Return strict JSON: {{{schema}}}."
     )
@@ -168,7 +204,10 @@ async def analyze_metrics(image_b64: str, view: str, session_id: str, region: st
         the call succeeded but the response had no usable score fields at
         all (every field in `result` is therefore LLM_FAILURE_SENTINEL)."""
         chat = _new_chat(attempt_session_id, system, temperature=temperature, json_mode=True)
-        msg = UserMessage(text=prompt, file_contents=[ImageContent(image_base64=image_b64)])
+        file_contents = [ImageContent(image_base64=image_b64)]
+        if reference_b64:
+            file_contents.append(ImageContent(image_base64=reference_b64))
+        msg = UserMessage(text=prompt, file_contents=file_contents)
         resp = await chat.send_message(msg)
         data = _extract_json(resp)
         empty = not data.get("density_score") and not data.get("coverage_score")
