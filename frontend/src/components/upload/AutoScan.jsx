@@ -1,14 +1,19 @@
 import { Button } from "@/components/ui/button";
 import { Camera, Loader2, Play, Sun, SunDim, Volume2, VolumeX, X } from "lucide-react";
+import { fileUrl } from "@/lib/api";
 import useAutoScan from "@/hooks/useAutoScan";
 import { REGIONS } from "./constants";
 import Silhouette from "./Silhouette";
 
-export default function AutoScan({ precision = true }) {
+export default function AutoScan({ precision = true, ghostPhotos }) {
   const {
     videoRef, region, setRegion, phase, progress, count, guide, pose, countdown,
     screenLight, setScreenLight, voiceOn, setVoiceOn, params, totalDurationS, start, cancel,
   } = useAutoScan(precision);
+
+  // Last scan's photo of this exact pose, shown very faintly over the live
+  // feed so the user can line up the same way as last time.
+  const ghostPath = ghostPhotos?.[pose];
 
   const size = 300, stroke = 9, r = (size - stroke) / 2, circ = 2 * Math.PI * r;
 
@@ -59,6 +64,15 @@ export default function AutoScan({ precision = true }) {
         <div className={`fixed inset-0 z-[60] flex flex-col items-center justify-center gap-4 sm:gap-6 px-6 py-6 overflow-y-auto transition-colors duration-300 ${screenLight ? "bg-white text-stone-700" : "bg-neutral-900 text-white"}`} data-testid="scan-overlay">
           <div className="relative rounded-full overflow-hidden shadow-2xl w-[min(70vw,300px)] aspect-square shrink-0" style={{ background: "#000" }}>
             <video ref={videoRef} autoPlay playsInline muted className="w-full h-full object-cover -scale-x-100" />
+            {ghostPath && (
+              <img
+                src={fileUrl(ghostPath)}
+                alt=""
+                aria-hidden="true"
+                data-testid="ghost-overlay"
+                className="absolute inset-0 w-full h-full object-cover -scale-x-100 opacity-25 pointer-events-none"
+              />
+            )}
             <Silhouette pose={pose} />
             <svg viewBox={`0 0 ${size} ${size}`} className="absolute inset-0 w-full h-full -rotate-90">
               <circle cx={size / 2} cy={size / 2} r={r} fill="none" stroke="rgba(255,255,255,0.3)" strokeWidth={stroke} />

@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { motion } from "framer-motion";
+import { useQuery } from "@tanstack/react-query";
 import { api } from "@/lib/api";
 import Navbar from "@/components/Navbar";
 import { Button } from "@/components/ui/button";
@@ -24,6 +25,14 @@ export default function UploadPage() {
   const [slots, setSlots] = useState({}); // regionKey -> { frames, preview, status }
   const [activeRegion, setActiveRegion] = useState(null);
   const [analyzing, setAnalyzing] = useState(false);
+
+  // Previous scan's best photo per region, shown as a translucent ghost
+  // overlay during capture so the user can line up the same way as last time.
+  const { data: lastPhotos } = useQuery({
+    queryKey: ["last-photos"],
+    queryFn: () => api.get("/sessions/last-photos").then((r) => r.data.photos || {}),
+    staleTime: 60_000,
+  });
 
   const storeFrames = (regionKey, frames) => {
     const best = [...frames].sort((a, b) => b.sharp - a.sharp)[0];
@@ -98,7 +107,7 @@ export default function UploadPage() {
         </div>
 
         {mode === "auto" ? (
-          <AutoScan precision={precision} />
+          <AutoScan precision={precision} ghostPhotos={lastPhotos} />
         ) : (
           <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-4 md:gap-6">
             {SCAN_REGIONS.map((region) => (
@@ -123,6 +132,7 @@ export default function UploadPage() {
         open={!!activeRegion}
         onClose={() => setActiveRegion(null)}
         onCaptured={onCaptured}
+        ghostPhotos={lastPhotos}
       />
     </div>
   );

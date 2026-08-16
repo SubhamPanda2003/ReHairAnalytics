@@ -1,6 +1,7 @@
 import { useEffect } from "react";
 import { Button } from "@/components/ui/button";
 import { Sun, SunDim, Volume2, VolumeX, X } from "lucide-react";
+import { fileUrl } from "@/lib/api";
 import useRegionCapture from "@/hooks/useRegionCapture";
 import { BURST_DURATION_S, BURST_KEEP } from "./constants";
 import Silhouette from "./Silhouette";
@@ -8,7 +9,7 @@ import Silhouette from "./Silhouette";
 /** Full-screen burst-capture for a single region: auto-fires shots for
  * BURST_DURATION_S seconds and hands the sharpest BURST_KEEP back via
  * onCaptured. Closes itself once capture finishes. */
-export default function RegionCaptureOverlay({ region, open, onClose, onCaptured }) {
+export default function RegionCaptureOverlay({ region, open, onClose, onCaptured, ghostPhotos }) {
   const {
     videoRef, phase, progress, count, start, cancel, reset,
     screenLight, setScreenLight, voiceOn, setVoiceOn,
@@ -26,6 +27,10 @@ export default function RegionCaptureOverlay({ region, open, onClose, onCaptured
 
   if (!open || !region) return null;
 
+  // Last scan's photo of this region, shown very faintly over the live feed
+  // so the user can line up the same way as last time.
+  const ghostPath = ghostPhotos?.[region.key];
+
   const size = 300, stroke = 9, r = (size - stroke) / 2, circ = 2 * Math.PI * r;
 
   return (
@@ -35,6 +40,15 @@ export default function RegionCaptureOverlay({ region, open, onClose, onCaptured
     >
       <div className="relative rounded-full overflow-hidden shadow-2xl w-[min(70vw,300px)] aspect-square shrink-0" style={{ background: "#000" }}>
         <video ref={videoRef} autoPlay playsInline muted className="w-full h-full object-cover -scale-x-100" />
+        {ghostPath && (
+          <img
+            src={fileUrl(ghostPath)}
+            alt=""
+            aria-hidden="true"
+            data-testid="ghost-overlay"
+            className="absolute inset-0 w-full h-full object-cover -scale-x-100 opacity-25 pointer-events-none"
+          />
+        )}
         <Silhouette pose={region.key} />
         <svg viewBox={`0 0 ${size} ${size}`} className="absolute inset-0 w-full h-full -rotate-90">
           <circle cx={size / 2} cy={size / 2} r={r} fill="none" stroke="rgba(255,255,255,0.3)" strokeWidth={stroke} />

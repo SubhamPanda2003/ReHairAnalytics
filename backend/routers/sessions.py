@@ -27,6 +27,20 @@ async def list_sessions(user: CurrentUser):
     return await sessions_service.attach_children(sessions)
 
 
+@router.get("/sessions/last-photos")
+async def get_last_photos(user: CurrentUser):
+    """Best photo per region from the user's most recent scan, so a new
+    capture can overlay a translucent ghost of it for pose alignment."""
+    last = await db.tracking_sessions.find({"user_id": user["user_id"]}, {"_id": 0}).sort("date", -1).to_list(1)
+    if not last:
+        return {"session_id": None, "photos": {}}
+    session_id = last[0]["id"]
+    imgs = await db.images.find({"tracking_session_id": session_id, "user_id": user["user_id"]}, {"_id": 0}).to_list(200)
+    by_region = sessions_service.best_per_region(imgs)
+    photos = {region: img["thumb_path"] for region, img in by_region.items()}
+    return {"session_id": session_id, "photos": photos}
+
+
 @router.get("/sessions/{session_id}")
 async def get_session(session_id: str, user: CurrentUser):
     s = await db.tracking_sessions.find_one({"id": session_id, "user_id": user["user_id"]}, {"_id": 0})
