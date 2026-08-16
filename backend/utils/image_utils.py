@@ -269,6 +269,58 @@ def framing_consistency(baseline_bytes: bytes, current_bytes: bytes) -> dict:
     return {"aligned": cmp["aligned"], "match_count": cmp["match_count"], "scale_shift_pct": cmp["scale_shift_pct"]}
 
 
+def _foreground_mask_grabcut(img, iterations: int = 5) -> np.ndarray:
+    """GrabCut foreground/background segmentation, seeded with a centered
+    rectangle rather than a face detector -- face detection was already tried
+    for this exact ROI problem and removed for unreliably returning "face not
+    found" on scalp photos (most regions here have no face in frame at all).
+    GrabCut needs no face concept, just color/texture statistics, so it
+    applies uniformly across crown/back/top-down/front alike.
+
+    The seed rect assumes the head fills most of the frame, which the app's
+    own silhouette-guided capture flow is designed to produce. Returns a
+    boolean mask (True = foreground); falls back to an ALL-foreground mask
+    (no restriction at all) if GrabCut errors or converges on almost nothing,
+    since a failed background removal should degrade to the old
+    whole-photo behavior, not produce an empty result.
+    """
+    h, w = img.shape[:2]
+    mask = np.zeros((h, w), np.uint8)
+    bgd_model = np.zeros((1, 65), np.float64)
+    fgd_model = np.zeros((1, 65), np.float64)
+    margin_x, margin_y = int(w * 0.08), int(h * 0.05)
+    rect = (margin_x, margin_y, w - 2 * margin_x, h - 2 * margin_y)
+    try:
+        cv2.grabCut(img, mask, rect, bgd_model, fgd_model, iterations, cv2.GC_INIT_WITH_RECT)
+    except cv2.error:
+        return np.ones((h, w), dtype=bool)
+    fg = np.where((mask == cv2.GC_FGD) | (mask == cv2.GC_PR_FGD), True, False)
+    if fg.sum() < 0.05 * fg.size:
+        return np.ones((h, w), dtype=bool)
+    return fg
+
+
+def _suppress_specular_highlights(img, v_thresh: float = 0.85, s_thresh: float = 0.25):
+    """Dampens specular highlights -- glare/shine, common on dark or oily hair
+    under strong lighting -- before scalp/hair clustering. A highlight is
+    very bright AND low-saturation (light reflecting straight off a surface
+    washes out color), which is what actually distinguishes it from genuine
+    scalp-colored skin: skin stays comparatively saturated even when well
+    lit. Without this, a bright reflection ON HAIR trips the same
+    "brightest cluster = scalp" heuristic a real visible scalp would,
+    marking a shiny patch of hair as scalp for a reason that has nothing to
+    do with how much scalp is actually showing.
+    """
+    hsv = cv2.cvtColor(img, cv2.COLOR_BGR2HSV).astype(np.float32)
+    v = hsv[..., 2]
+    spec_mask = (v > v_thresh * 255) & (hsv[..., 1] < s_thresh * 255)
+    if not spec_mask.any():
+        return img
+    v[spec_mask] = np.clip(v[spec_mask] - (v_thresh * 255 * 0.35), 0, 255)
+    hsv[..., 2] = v
+    return cv2.cvtColor(hsv.astype(np.uint8), cv2.COLOR_HSV2BGR)
+
+
 def mark_scalp_patches(image_bytes: bytes, max_dim: int = 800) -> "bytes | None":
     """Highlight areas of a hair/scalp photo that color-clustering identifies as
     scalp-colored rather than hair-colored, tinted red. Purely a visual aid for
@@ -278,20 +330,23 @@ def mark_scalp_patches(image_bytes: bytes, max_dim: int = 800) -> "bytes | None"
     K-means (k=3: hair / scalp-skin / other) same as the density estimate used
     to use, treating the darkest cluster as "hair" -- true for most hair colors
     against scalp/skin, but breaks down for gray/blonde hair on fair skin, a
-    known, unresolved limitation of this heuristic. Runs on the whole photo (no
-    face-based ROI -- that pipeline was removed), so for regions where a lot of
-    face/neck skin is in frame (mainly "front"), some of that skin can get
-    tinted too; it isn't restricted to the scalp specifically.
+    known, unresolved limitation of this heuristic.
 
-    The K-MEANS STEP runs on a lighting-normalized copy of the photo (see
-    normalize_lighting) -- bright/uneven lighting washes out hair color
-    enough that it stops being the "darkest" cluster, which this heuristic
-    depends on, so strongly-lit hair was getting misclassified as scalp
-    purely from exposure, not anything about the hair itself. The visual
+    Three preprocessing passes on the CLASSIFICATION copy only (the visual
     overlay is still composited onto the ORIGINAL, non-normalized photo, so
-    what's shown stays the user's actual photo with a red tint, not a
-    contrast-boosted version of it -- only the classification decision uses
-    the normalized copy.
+    what's shown stays the user's actual capture with a red tint):
+    1. Lighting normalization (normalize_lighting/CLAHE) -- bright/uneven
+       lighting otherwise washes hair color out of being the "darkest"
+       cluster this heuristic depends on.
+    2. GrabCut background removal (_foreground_mask_grabcut) -- restricts
+       both clustering and the final mask to the head/hair region, since
+       room/wall background was previously classified right alongside real
+       scalp with no ROI restriction at all (the earlier face-based ROI
+       pipeline was removed for being unreliable -- GrabCut needs no face).
+    3. Specular-highlight suppression (_suppress_specular_highlights) --
+       dampens bright glare/shine spots on hair itself before clustering,
+       so a reflection doesn't get misread as scalp the way real exposed
+       scalp would.
 
     Returns None if the photo can't be decoded, rather than a fabricated image.
     """
@@ -307,18 +362,29 @@ def mark_scalp_patches(image_bytes: bytes, max_dim: int = 800) -> "bytes | None"
     normalized_bytes = normalize_lighting(image_bytes)
     cluster_img = _decode_bgr(normalized_bytes) if normalized_bytes else None
     if cluster_img is None:
-        cluster_img = img
+        cluster_img = img.copy()
     elif cluster_img.shape[:2] != (h, w):
         cluster_img = cv2.resize(cluster_img, (w, h))
+
+    fg_mask = _foreground_mask_grabcut(cluster_img)
+    cluster_img = _suppress_specular_highlights(cluster_img)
 
     pixels = cluster_img.reshape(-1, 3).astype(np.float32)
     if len(pixels) < 50:
         return None
+    fg_flat = fg_mask.reshape(-1)
+    fit_pixels = pixels[fg_flat] if fg_flat.sum() >= 50 else pixels
     k = 3
     criteria = (cv2.TERM_CRITERIA_EPS + cv2.TERM_CRITERIA_MAX_ITER, 20, 0.5)
-    _, labels, centers = cv2.kmeans(pixels, k, None, criteria, 3, cv2.KMEANS_PP_CENTERS)
+    _, _, centers = cv2.kmeans(fit_pixels, k, None, criteria, 3, cv2.KMEANS_PP_CENTERS)
     hair_cluster = int(np.argmin(centers.sum(axis=1)))
-    scalp_mask = (labels.reshape(h, w) != hair_cluster).astype(np.uint8) * 255
+
+    # Cluster centers were fit on foreground-only pixels (unbiased by
+    # background walls), but every pixel in frame still needs a label to
+    # build a full (h, w) mask -- assign each to its nearest center.
+    dists = np.stack([np.linalg.norm(pixels - centers[i], axis=1) for i in range(k)], axis=1)
+    labels_full = np.argmin(dists, axis=1)
+    scalp_mask = ((labels_full != hair_cluster) & fg_flat).astype(np.uint8).reshape(h, w) * 255
 
     # Morphological open+close to clear speckle noise into coherent patches --
     # "patches" implies contiguous areas, not a salt-and-pepper pixel scatter.

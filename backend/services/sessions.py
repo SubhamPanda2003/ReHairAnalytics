@@ -588,6 +588,14 @@ async def _generate_scalp_map(storage_path: str, user_id: str, session_id: str, 
     not a measurement. Returns the stored overlay image's path, or None if the
     source photo can't be loaded or processed; never blocks the rest of the
     scan's analysis from saving.
+
+    Called by finalize_day_analysis ONLY for the "crown" region -- crown is
+    the one view this heuristic was actually built/tuned against (also the
+    source of the real photos used to validate the lighting/background
+    fixes in image_utils.py), and other regions carry more of its known
+    failure modes (front's face/neck skin, side views' ears/background) with
+    no extra benefit. Callers should pass region="crown" and treat any other
+    value as "don't call this at all" rather than relying on a check here.
     """
     try:
         data, _ = await asyncio.to_thread(store.get_object, storage_path)
@@ -716,7 +724,11 @@ async def finalize_day_analysis(user: dict, session_id: str, region: str, precis
             # signal, self-reported confidence isn't.
             reg_metrics["confidence"] = _spread_to_confidence(reg_metrics["spread"])
         region_storage_path[reg_key] = topn[0]["storage_path"]
-        reg_metrics["scalp_map_path"] = await _generate_scalp_map(topn[0]["storage_path"], user["user_id"], session_id, reg_key)
+        # Scalp map is crown-only (see _generate_scalp_map's docstring) --
+        # every other region gets no map generated at all, not just a hidden
+        # one, so this also skips the GrabCut/k-means work for regions where
+        # it was never shown.
+        reg_metrics["scalp_map_path"] = await _generate_scalp_map(topn[0]["storage_path"], user["user_id"], session_id, reg_key) if reg_key == "crown" else None
         per_region[reg_key] = reg_metrics
     else:
         # Full scan: pick the single best-confidence frame per region, ensemble-reanalyze
@@ -740,7 +752,8 @@ async def finalize_day_analysis(user: dict, session_id: str, region: str, precis
                 reg_metrics["spread"] = spread
                 region_spreads.append(spread)
             region_storage_path[reg] = best["storage_path"]
-            reg_metrics["scalp_map_path"] = await _generate_scalp_map(best["storage_path"], user["user_id"], session_id, reg)
+            # Scalp map is crown-only (see _generate_scalp_map's docstring).
+            reg_metrics["scalp_map_path"] = await _generate_scalp_map(best["storage_path"], user["user_id"], session_id, reg) if reg == "crown" else None
             per_region[reg] = reg_metrics
 
     def avg(key: str) -> int:
