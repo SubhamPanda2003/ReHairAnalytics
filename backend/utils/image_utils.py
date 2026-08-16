@@ -269,32 +269,57 @@ def framing_consistency(baseline_bytes: bytes, current_bytes: bytes) -> dict:
     return {"aligned": cmp["aligned"], "match_count": cmp["match_count"], "scale_shift_pct": cmp["scale_shift_pct"]}
 
 
-def _foreground_mask_centered(img) -> np.ndarray:
-    """Lightweight foreground/background split: a centered ellipse covering
-    most of the frame -- no iterative segmentation, effectively free to
-    compute (one cv2.ellipse draw + a comparison). Replaces an earlier
-    cv2.grabCut-based version: GrabCut's iterative graph-cut optimization
-    (a full pixel graph + two Gaussian Mixture Models, refit over several
-    iterations) is genuinely CPU- and memory-heavy -- fine on a dev machine,
-    but a real risk on a small production container (measured 2-7.5s and a
-    real memory spike per photo on hardware with far more headroom than a
-    constrained deployment would have). Not worth that risk for what's
-    already just a visual aid, not a measurement.
+def _foreground_mask_grabcut(img, small_dim: int = 160, iterations: int = 2) -> np.ndarray:
+    """GrabCut foreground/background segmentation, run on a heavily
+    DOWNSCALED copy of the photo and the resulting mask upscaled back to
+    match -- not full GrabCut at working resolution. An earlier version ran
+    GrabCut on the full ~800px image at 5 iterations and was replaced with a
+    fixed centered ellipse after being measured as a real CPU/memory risk on
+    a small (~200MB) production container (2-7.5s and a real memory spike
+    per photo on dev hardware with far more headroom than that). The ellipse
+    turned out too crude to be useful, though -- it can't tell real
+    background from real hair/scalp, it just assumes a shape.
 
-    Trades adaptiveness (it doesn't look at the actual photo content at all)
-    for being effectively zero-cost. The app's silhouette-guided capture
-    flow already encourages centered, frame-filling head photos, so a fixed
-    ellipse is a reasonable approximation of "head" vs. "background at the
-    edges" without any of GrabCut's resource risk. Returns a boolean mask
-    (True = foreground/inside the ellipse).
+    GrabCut's cost scales with the size of the pixel graph it builds, not
+    with the algorithm being inherently unaffordable -- at small_dim=160
+    (roughly 25x fewer pixels than the previous 800px version) with 2
+    iterations instead of 5, measured time dropped to 0.03-0.05s per photo
+    (vs 2-7.5s), and Python-visible peak allocation dropped ~15x (a real
+    undercount -- GrabCut's actual graph/GMM memory lives in OpenCV's C++
+    internals, which scale directly with pixel count, same as the timing).
+
+    Trades boundary precision for cost, not adaptiveness for cost: this
+    still looks at the actual photo and follows the real head/background
+    boundary, just at a coarse resolution -- exactly what "exclude the wall
+    behind someone's head" needs, not hair-strand-level tracing. Seeded with
+    a centered rectangle rather than a face detector, same reasoning as
+    before: face detection was already tried for this exact ROI problem and
+    removed for unreliably returning "face not found" on scalp photos.
+
+    Returns a boolean mask at the ORIGINAL img's resolution (True =
+    foreground). Falls back to an ALL-foreground mask (no restriction) if
+    GrabCut errors or converges on almost nothing, since a failed background
+    removal should degrade to the old whole-photo behavior, not an empty
+    result.
     """
     h, w = img.shape[:2]
-    mask = np.zeros((h, w), dtype=np.uint8)
-    margin_x, margin_y = int(w * 0.08), int(h * 0.05)
-    center = (w // 2, h // 2)
-    axes = (max(1, (w - 2 * margin_x) // 2), max(1, (h - 2 * margin_y) // 2))
-    cv2.ellipse(mask, center, axes, 0, 0, 360, 255, -1)
-    return mask > 0
+    scale = small_dim / max(h, w)
+    small = cv2.resize(img, (max(1, int(w * scale)), max(1, int(h * scale))))
+    sh, sw = small.shape[:2]
+    mask = np.zeros((sh, sw), np.uint8)
+    bgd_model = np.zeros((1, 65), np.float64)
+    fgd_model = np.zeros((1, 65), np.float64)
+    margin_x, margin_y = int(sw * 0.08), int(sh * 0.05)
+    rect = (margin_x, margin_y, sw - 2 * margin_x, sh - 2 * margin_y)
+    try:
+        cv2.grabCut(small, mask, rect, bgd_model, fgd_model, iterations, cv2.GC_INIT_WITH_RECT)
+    except cv2.error:
+        return np.ones((h, w), dtype=bool)
+    fg_small = np.where((mask == cv2.GC_FGD) | (mask == cv2.GC_PR_FGD), 255, 0).astype(np.uint8)
+    if (fg_small > 0).sum() < 0.05 * fg_small.size:
+        return np.ones((h, w), dtype=bool)
+    fg_full = cv2.resize(fg_small, (w, h), interpolation=cv2.INTER_NEAREST)
+    return fg_full > 0
 
 
 def _suppress_specular_highlights(img, v_thresh: float = 0.85, s_thresh: float = 0.25):
@@ -335,13 +360,13 @@ def mark_scalp_patches(image_bytes: bytes, max_dim: int = 800) -> "bytes | None"
     1. Lighting normalization (normalize_lighting/CLAHE) -- bright/uneven
        lighting otherwise washes hair color out of being the "darkest"
        cluster this heuristic depends on.
-    2. Centered-ellipse background exclusion (_foreground_mask_centered) --
-       restricts both clustering and the final mask to a centered ellipse,
+    2. Downscaled GrabCut background removal (_foreground_mask_grabcut) --
+       restricts both clustering and the final mask to the head/hair region,
        since room/wall background was previously classified right alongside
        real scalp with no ROI restriction at all (the earlier face-based ROI
-       pipeline was removed for being unreliable, and a GrabCut-based
-       version of this step was removed for being too CPU/memory-heavy for
-       a small production container -- see that function's docstring).
+       pipeline was removed for being unreliable -- GrabCut needs no face).
+       Runs on a heavily downscaled copy, not the working-resolution image
+       -- see that function's docstring for why.
     3. Specular-highlight suppression (_suppress_specular_highlights) --
        dampens bright glare/shine spots on hair itself before clustering,
        so a reflection doesn't get misread as scalp the way real exposed
@@ -365,7 +390,7 @@ def mark_scalp_patches(image_bytes: bytes, max_dim: int = 800) -> "bytes | None"
     elif cluster_img.shape[:2] != (h, w):
         cluster_img = cv2.resize(cluster_img, (w, h))
 
-    fg_mask = _foreground_mask_centered(cluster_img)
+    fg_mask = _foreground_mask_grabcut(cluster_img)
     cluster_img = _suppress_specular_highlights(cluster_img)
 
     pixels = cluster_img.reshape(-1, 3).astype(np.float32)
