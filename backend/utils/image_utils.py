@@ -283,6 +283,16 @@ def mark_scalp_patches(image_bytes: bytes, max_dim: int = 800) -> "bytes | None"
     face/neck skin is in frame (mainly "front"), some of that skin can get
     tinted too; it isn't restricted to the scalp specifically.
 
+    The K-MEANS STEP runs on a lighting-normalized copy of the photo (see
+    normalize_lighting) -- bright/uneven lighting washes out hair color
+    enough that it stops being the "darkest" cluster, which this heuristic
+    depends on, so strongly-lit hair was getting misclassified as scalp
+    purely from exposure, not anything about the hair itself. The visual
+    overlay is still composited onto the ORIGINAL, non-normalized photo, so
+    what's shown stays the user's actual photo with a red tint, not a
+    contrast-boosted version of it -- only the classification decision uses
+    the normalized copy.
+
     Returns None if the photo can't be decoded, rather than a fabricated image.
     """
     img = _decode_bgr(image_bytes)
@@ -294,7 +304,14 @@ def mark_scalp_patches(image_bytes: bytes, max_dim: int = 800) -> "bytes | None"
         img = cv2.resize(img, (int(w * scale), int(h * scale)))
         h, w = img.shape[:2]
 
-    pixels = img.reshape(-1, 3).astype(np.float32)
+    normalized_bytes = normalize_lighting(image_bytes)
+    cluster_img = _decode_bgr(normalized_bytes) if normalized_bytes else None
+    if cluster_img is None:
+        cluster_img = img
+    elif cluster_img.shape[:2] != (h, w):
+        cluster_img = cv2.resize(cluster_img, (w, h))
+
+    pixels = cluster_img.reshape(-1, 3).astype(np.float32)
     if len(pixels) < 50:
         return None
     k = 3
