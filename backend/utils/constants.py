@@ -88,11 +88,25 @@ REGION_ORDER = ["front", "left", "right", "crown", "hairline", "back", "top"]
 # way, and change-maps needs one concrete image to align against).
 BASELINE_BLEND_N = 3
 
-# Used only when a session has no measured spread at all (e.g. ensembling never
-# ran because the photo couldn't be re-fetched, or precision mode was off) -- a
-# documented assumption, not a measured value, so treat it as conservative
-# rather than precise.
-DEFAULT_NOISE_FLOOR = 4
+# How much a photo-to-photo CAPTURE difference alone (slightly different
+# angle/exposure/focus between two real sessions of the same person, nothing
+# about their hair actually changed) moves analyze_metrics()'s overall_score
+# -- measured via tests/eval_noise_floor.py's synthetic-perturbation eval,
+# not assumed. Combined with a session's own measured LLM-read spread (see
+# services.sessions.build_progress -> utils.trend.combined_noise_floor) to
+# get the real noise floor a trend has to clear before it's "confirmed".
+#
+# Measured 2026-08-16 against 3 real photos (crown region, gemini-2.5-flash):
+# per-photo overall_score spread across 6 small perturbations (±3° rotation,
+# ±15% brightness, 5% shift, mild blur) was 13, 2, and 37 -- mean 17.3,
+# rounded here. That's ~4x the previous ASSUMED value of 4; a 3-degree
+# rotation alone swung one photo's score from 30 to 65. Small sample (n=3),
+# so treat the exact number loosely, but the direction is unambiguous:
+# capture noise is large enough that most single-session-to-session deltas
+# this app would previously have called a "trend" are within noise.
+# TODO: re-measure (bigger sample) and update after any capture-flow,
+# calibration prompt, or model change -- it will drift out of date otherwise.
+CAPTURE_NOISE_FLOOR = 17
 
 
 # --- Image alignment (utils/image_utils.py) ---

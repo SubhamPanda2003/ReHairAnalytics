@@ -14,8 +14,9 @@ from models.database import db
 from utils import image_utils
 from utils.constants import (
     METRIC_KEYS, DELTA_KEYS, BLUR_QUALITY_MIN, ENSEMBLE_N, REGION_ORDER, BASELINE_BLEND_N, LLM_FAILURE_SENTINEL,
-    DEFAULT_NOISE_FLOOR,
+    CAPTURE_NOISE_FLOOR,
 )
+from utils.trend import combined_noise_floor, fit_trend
 
 logger = logging.getLogger(__name__)
 
@@ -162,6 +163,7 @@ async def build_progress(user_id: str) -> dict:
         a = await db.analysis.find_one({"tracking_session_id": s["id"]}, {"_id": 0})
         if a:
             _dt = datetime.fromisoformat(s["date"]) if isinstance(s["date"], str) else s["date"]
+            framing_note = a.get("framing_note")
             points.append({
                 "label": _dt.strftime("%b %d"),
                 "date": s["date"],
@@ -171,6 +173,12 @@ async def build_progress(user_id: str) -> dict:
                 "quality": a.get("quality_score", 0),
                 "overall": a["overall_score"],
                 "spread": a.get("measurement_spread"),
+                # None for the baseline session itself (nothing to align
+                # against yet), else whether this photo's ORB/homography
+                # alignment against the baseline actually succeeded -- a
+                # real input to how much a delta involving this point should
+                # be trusted, not just the AI's own score confidence.
+                "framing_ok": framing_note.get("aligned") if framing_note else None,
             })
     for i, p in enumerate(points):
         window = points[max(0, i - 1):i + 1]
@@ -179,8 +187,7 @@ async def build_progress(user_id: str) -> dict:
     latest = points[-1] if points else None
     baseline = points[0] if points else None
     streak = len(sessions)
-    noise_floor = (latest.get("spread") if latest else None)
-    noise_floor = noise_floor if noise_floor is not None else DEFAULT_NOISE_FLOOR
+    noise_floor = combined_noise_floor(CAPTURE_NOISE_FLOOR, latest.get("spread") if latest else None)
     est_progress = None
     if latest and baseline and latest != baseline:
         def _delta(key):
@@ -199,6 +206,24 @@ async def build_progress(user_id: str) -> dict:
         if ld.tzinfo is None:
             ld = ld.replace(tzinfo=timezone.utc)
         days_since = (datetime.now(timezone.utc) - ld).days
+
+    # Whether the OVERALL score is really trending, not just wobbling within
+    # noise -- fits a line across every point (not just latest-vs-baseline)
+    # and only calls it "confirmed" once the slope clears a threshold set by
+    # REAL measured noise (see utils/trend.py), not an assumed one.
+    trend = fit_trend(points, "overall", noise_floor)
+    misaligned = [p for p in points if p.get("framing_ok") is False]
+    if trend["confirmed"] and misaligned:
+        # A statistically clean slope doesn't mean much if some of the
+        # photos it's built on didn't actually align with the baseline --
+        # framing drift can produce a fake trend just as easily as it can
+        # hide a real one. Veto rather than silently average it in.
+        trend["confirmed"] = False
+        trend["caveat"] = (
+            f"{len(misaligned)} photo(s) in this range didn't align well with the baseline -- "
+            "treating the trend as unconfirmed until framing is more consistent."
+        )
+
     return {
         "points": points,
         "latest": latest,
@@ -206,6 +231,7 @@ async def build_progress(user_id: str) -> dict:
         "streak": streak,
         "estimated_progress": est_progress,
         "noise_floor": noise_floor,
+        "trend": trend,
         "last_date": last_date,
         "days_since_last": days_since,
         "total_uploads": await db.images.count_documents({"user_id": user_id}),
