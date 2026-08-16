@@ -10,6 +10,7 @@ import { Button } from "@/components/ui/button";
 import { LineChart, Line, AreaChart, Area, ResponsiveContainer, XAxis, YAxis, Tooltip, CartesianGrid } from "recharts";
 import { Flame, ImageIcon, Plus, Camera, ArrowRight, Sparkles, Bell } from "lucide-react";
 import MetricDelta from "@/components/MetricDelta";
+import TrendBadge from "@/components/TrendBadge";
 
 const fetchProgress = async () => (await api.get("/progress")).data;
 const fetchTimeline = async () => (await api.get("/timeline")).data;
@@ -99,6 +100,7 @@ export default function Dashboard() {
                 <div className="flex items-center gap-2 text-muted-foreground text-xs uppercase tracking-[0.15em] mb-3"><Sparkles className="w-4 h-4" /> Est. progress</div>
                 <p className="font-heading text-4xl font-bold">{latest?.overall ?? "—"}</p>
                 <MetricDelta current={latest?.overall} baseline={progress?.baseline?.overall} testId="delta-est-progress" />
+                <TrendBadge trend={progress?.trend} className="mt-2" testId="dashboard-trend-badge" />
               </Card>
               <Card delay={0.15} data-testid="card-confidence">
                 <div className="flex items-center gap-2 text-muted-foreground text-xs uppercase tracking-[0.15em] mb-3"><Plus className="w-4 h-4" /> Quality</div>

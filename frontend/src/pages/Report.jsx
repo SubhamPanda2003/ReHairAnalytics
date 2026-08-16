@@ -9,6 +9,7 @@ import { Button } from "@/components/ui/button";
 import { LineChart, Line, ResponsiveContainer, XAxis, YAxis, Tooltip, CartesianGrid, Legend } from "recharts";
 import { Download, Activity, Loader2 } from "lucide-react";
 import MetricDelta from "@/components/MetricDelta";
+import TrendBadge from "@/components/TrendBadge";
 import ChangeMaps from "@/components/ChangeMaps";
 import ExperimentalDensity from "@/components/ExperimentalDensity";
 import ScalpMap from "@/components/ScalpMap";
@@ -151,9 +152,15 @@ export default function Report() {
               {/* Trend */}
               {points.length > 1 && (
                 <div className="mb-8">
-                  <h3 className="font-heading font-semibold mb-1">Trend over time</h3>
+                  <div className="flex flex-wrap items-center justify-between gap-2 mb-1">
+                    <h3 className="font-heading font-semibold">Trend over time</h3>
+                    <TrendBadge trend={progress?.trend} testId="report-trend-badge" />
+                  </div>
                   <p className="text-xs text-muted-foreground mb-3">
                     "Overall (smoothed)" averages each point with the one before it, so a single noisy reading doesn't look like a real swing.
+                    {progress?.trend?.direction && progress.trend.direction !== "insufficient_data" && (
+                      " The badge above fits a line across every scan and only calls it a real trend once it clears normal measurement noise -- not just whether the last two points moved."
+                    )}
                   </p>
                   <ResponsiveContainer width="100%" height={240}>
                     <LineChart data={points} margin={{ left: -20, right: 8 }}>

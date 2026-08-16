@@ -13,6 +13,7 @@ import {
 import { toast } from "sonner";
 import { LineChart, Line, ResponsiveContainer, XAxis, YAxis, Tooltip, CartesianGrid, Legend } from "recharts";
 import { Camera, ChevronRight, Loader2, ImageOff, Trash2 } from "lucide-react";
+import TrendBadge from "@/components/TrendBadge";
 
 const fetchTimeline = async () => (await api.get("/timeline")).data;
 const fetchProgress = async () => (await api.get("/progress")).data;
@@ -66,7 +67,10 @@ export default function Timeline() {
           <>
             {points.length > 1 && (
               <div className="rounded-2xl border border-border bg-card p-6 mb-8" data-testid="timeline-chart">
-                <h3 className="font-heading font-semibold text-lg mb-4">All metrics over time</h3>
+                <div className="flex flex-wrap items-center justify-between gap-2 mb-4">
+                  <h3 className="font-heading font-semibold text-lg">All metrics over time</h3>
+                  <TrendBadge trend={progress?.trend} testId="timeline-trend-badge" />
+                </div>
                 <ResponsiveContainer width="100%" height={260}>
                   <LineChart data={points} margin={{ left: -20, right: 8 }}>
                     <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" vertical={false} />
