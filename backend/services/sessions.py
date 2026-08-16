@@ -251,7 +251,14 @@ async def build_progress(user_id: str) -> dict:
     latest = points[-1] if points else None
     baseline = points[0] if points else None
     streak = len(sessions)
-    noise_floor = combined_noise_floor(CAPTURE_NOISE_FLOOR, latest.get("spread") if latest else None)
+    # Rounded before it ever leaves this function -- root-sum-square combining
+    # a whole-number constant with a real measured spread produces something
+    # like 17.11724276..., and every caller (Report's "changes smaller than
+    # ±X points" copy included) would otherwise display that raw float
+    # verbatim. That's false precision: CAPTURE_NOISE_FLOOR itself is a loose,
+    # n=3 estimate (see its docstring), so a 4-decimal-place noise floor
+    # doesn't mean anything the way a lab measurement's would.
+    noise_floor = round(combined_noise_floor(CAPTURE_NOISE_FLOOR, latest.get("spread") if latest else None), 1)
     est_progress = None
     if latest and baseline and latest != baseline:
         def _delta(key):
@@ -663,6 +670,14 @@ async def finalize_day_analysis(user: dict, session_id: str, region: str, precis
         only = sorted(only, key=lambda x: x.get("confidence", 0), reverse=True)
         topn = only[: min(4, len(only))]
         reg_key = list(by_region.keys())[0] if by_region else region
+        # Spread/confidence below must reflect pure CAPTURE noise -- this
+        # session's own repeated frames of the same region -- computed from
+        # `topn` BEFORE the reference-conditioned read is folded in. That read
+        # is semi-correlated with the previous session by design (that's the
+        # whole point of it), so mixing it into a max-min spread would
+        # conflate "consistent with last time" with "genuinely low noise",
+        # and could just as easily widen the reported spread as narrow it.
+        overall_vals = [v for v in (f.get("overall_score", 0) for f in topn) if v != LLM_FAILURE_SENTINEL]
         if precision:
             # One extra read of the winning frame, calibrated against this
             # region's previous photo+score (see _reference_scored_frame) --
@@ -681,7 +696,6 @@ async def finalize_day_analysis(user: dict, session_id: str, region: str, precis
         # real signal, so use it instead of re-analyzing. Only across frames that
         # actually produced a real overall_score -- a failed read isn't "spread",
         # it's missing data, and would otherwise inflate the spread artificially.
-        overall_vals = [v for v in (f.get("overall_score", 0) for f in topn) if v != LLM_FAILURE_SENTINEL]
         if len(overall_vals) >= 2:
             reg_metrics["spread"] = max(overall_vals) - min(overall_vals)
             region_spreads.append(reg_metrics["spread"])
