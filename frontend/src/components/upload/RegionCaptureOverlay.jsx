@@ -47,7 +47,7 @@ export default function RegionCaptureOverlay({ region, open, onClose, onCaptured
             alt=""
             aria-hidden="true"
             data-testid="ghost-overlay"
-            className="absolute inset-0 w-full h-full object-cover -scale-x-100 opacity-50 pointer-events-none"
+            className="absolute inset-0 w-full h-full object-cover -scale-x-100 opacity-30 pointer-events-none"
           />
         )}
         <Silhouette pose={region.key} />
