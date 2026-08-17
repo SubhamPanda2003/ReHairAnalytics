@@ -559,13 +559,18 @@ async def _compute_density_estimate(images: list[dict], session_id: str) -> Opti
     """Rough hairs/cm^2 guess from the LLM (see ai_service.estimate_density_llm),
     computed ONCE per scan here and stored on the analysis document -- not
     re-queried (and not re-billed) every time the UI panel showing it gets
-    opened. Picks the same photo the old on-demand endpoint preferred (front,
-    then hairline, then best overall). Returns None on any failure -- this is
-    an optional, experimental figure and must never block the rest of the
-    scan's analysis from saving.
+    opened. Prefers the crown photo -- crown/vertex is where pattern hair
+    loss actually shows up densitometrically (same reasoning as the
+    crown-only scalp map), and it's consistently framed with minimal
+    face/neck skin in shot, unlike front. Falls back to the old priority
+    (front, then hairline, then best overall) when a scan didn't capture
+    crown at all (e.g. a hairline- or front-focused single-region scan), so
+    this stays useful outside full/crown scans rather than going blank.
+    Returns None on any failure -- this is an optional, experimental figure
+    and must never block the rest of the scan's analysis from saving.
     """
     by_region = best_per_region(images)
-    candidate = next((by_region[k] for k in ("front", "hairline") if k in by_region), None)
+    candidate = next((by_region[k] for k in ("crown", "front", "hairline") if k in by_region), None)
     if candidate is None and images:
         candidate = max(images, key=lambda i: (i.get("confidence", 0), i.get("quality_score", 0)))
     if candidate is None:
