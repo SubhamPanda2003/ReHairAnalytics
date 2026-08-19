@@ -11,9 +11,11 @@ import AutoScan from "@/components/upload/AutoScan";
 import ViewSlot from "@/components/upload/ViewSlot";
 import RegionCaptureOverlay from "@/components/upload/RegionCaptureOverlay";
 import { SCAN_REGIONS } from "@/components/upload/constants";
+import { useAuth } from "@/context/AuthContext";
 
 export default function UploadPage() {
   const navigate = useNavigate();
+  const { refreshQuota } = useAuth();
   const [mode, setMode] = useState("auto");
   // Re-checks each region's reading a couple extra times and blends them,
   // trading scan time for steadier scores. On by default -- a 42-photo real
@@ -71,7 +73,11 @@ export default function UploadPage() {
       toast.success("Photos captured — analyzing now.");
       navigate(`/results/${res.data.session_id}`);
     } catch (e) {
-      toast.error(e.response?.data?.detail || "Analysis failed");
+      if (e.response?.data?.detail?.code === "scan_limit_reached") {
+        refreshQuota();
+      } else {
+        toast.error(e.response?.data?.detail || "Analysis failed");
+      }
       setAnalyzing(false);
     }
   };

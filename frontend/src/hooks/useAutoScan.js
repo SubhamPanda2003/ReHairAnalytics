@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { toast } from "sonner";
 import { api } from "@/lib/api";
+import { useAuth } from "@/context/AuthContext";
 import { REGION_PARAMS, POSE_COUNTDOWN_S } from "@/components/upload/constants";
 
 /** Drives the guided selfie-camera capture loop: for each pose in sequence,
@@ -12,6 +13,7 @@ import { REGION_PARAMS, POSE_COUNTDOWN_S } from "@/components/upload/constants";
  * sharpest frames to /scan. */
 export default function useAutoScan(precision = true) {
   const navigate = useNavigate();
+  const { refreshQuota } = useAuth();
   const videoRef = useRef(null);
   const streamRef = useRef(null);
   const framesRef = useRef([]);
@@ -87,7 +89,15 @@ export default function useAutoScan(precision = true) {
       toast.success("Photos captured — analyzing now.");
       navigate(`/results/${res.data.session_id}`);
     } catch (e) {
-      toast.error(e.response?.data?.detail || "Scan analysis failed");
+      // Limit was hit between page-load and this submit (e.g. another tab, or
+      // an admin just changed it) -- refresh the shared quota so
+      // ProtectedRoute swaps in the freeze screen instead of a toast that
+      // just disappears.
+      if (e.response?.data?.detail?.code === "scan_limit_reached") {
+        refreshQuota();
+      } else {
+        toast.error(e.response?.data?.detail || "Scan analysis failed");
+      }
       setPhase("idle");
     }
   };

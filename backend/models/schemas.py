@@ -40,3 +40,13 @@ class AppointmentIn(BaseModel):
 
 class RoleIn(BaseModel):
     role: str
+
+
+class ScanLimitIn(BaseModel):
+    scan_limit: Optional[int] = None
+
+
+class SettingsIn(BaseModel):
+    default_scan_limit: Optional[int] = None
+    exhausted_message: Optional[str] = None
+    whatsapp_number: Optional[str] = None

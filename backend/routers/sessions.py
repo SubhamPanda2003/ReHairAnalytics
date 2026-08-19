@@ -12,9 +12,15 @@ from models.database import db
 from utils.deps import CurrentUser
 from models.schemas import SessionIn
 from services import ai_service, storage as store
+from services import quota as quota_service
 from services import sessions as sessions_service
 
 router = APIRouter(tags=["sessions"])
+
+
+@router.get("/scan/quota")
+async def get_scan_quota(user: CurrentUser):
+    return await quota_service.quota_for(user)
 
 
 @router.post("/sessions")
@@ -112,6 +118,16 @@ async def auto_scan(
     """
     if region not in ("full", "crown", "hairline"):
         region = "full"
+
+    limit = await quota_service.effective_limit(user)
+    if limit is not None and await quota_service.scan_count(user["user_id"]) >= limit:
+        settings = await quota_service.get_settings()
+        raise HTTPException(status_code=403, detail={
+            "code": "scan_limit_reached",
+            "message": settings["exhausted_message"],
+            "whatsapp_number": settings["whatsapp_number"],
+        })
+
     session = await sessions_service.create_tracking_session(user["user_id"])
     session_id = session["id"]
 
