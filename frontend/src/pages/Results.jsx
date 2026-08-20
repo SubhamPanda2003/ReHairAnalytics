@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useEffect, useState } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { useQuery, useQueryClient, useMutation } from "@tanstack/react-query";
 import { motion } from "framer-motion";
@@ -72,6 +72,20 @@ export default function Results() {
     refetchInterval: (query) => (query.state.data?.analysis || !query.state.data?.processing ? false : 5000),
   });
   const [toDelete, setToDelete] = useState(null);
+
+  // /scan's background job writes the analysis directly into ["session", id]
+  // (what this page polls) but never touches the separate ["timeline"]/["progress"]
+  // caches that Dashboard/Timeline/Report read their trend charts from. Without
+  // this, whoever already had those cached from earlier in the session (the
+  // common case for a returning user who doesn't reload the tab between scans)
+  // keeps seeing a snapshot from before this scan until the cache happens to
+  // go stale on its own -- the newest point silently missing from every chart.
+  useEffect(() => {
+    if (s?.analysis) {
+      qc.invalidateQueries({ queryKey: ["timeline"] });
+      qc.invalidateQueries({ queryKey: ["progress"] });
+    }
+  }, [sessionId, s?.analysis, qc]);
 
   const deleteImage = useMutation({
     mutationFn: (imageId) => api.delete(`/images/${imageId}`),
