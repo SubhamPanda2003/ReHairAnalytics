@@ -5,6 +5,7 @@ import { useAuth } from "@/context/AuthContext";
 import { Button } from "@/components/ui/button";
 import { toast } from "sonner";
 import { Activity, Camera, LineChart, ShieldCheck, Sparkles, Ruler, Clock, ArrowRight, Check, Stethoscope, X } from "lucide-react";
+import SampleReportPreview from "@/components/landing/SampleReportPreview";
 
 // REMINDER: DO NOT HARDCODE THE URL, OR ADD ANY FALLBACKS OR REDIRECT URLS, THIS BREAKS THE AUTH
 const login = () => {
@@ -110,6 +111,8 @@ export default function Landing() {
           </motion.div>
         </div>
       </section>
+
+      <SampleReportPreview onGetStarted={login} />
 
       {/* Standardized Photography */}
       <section className="bg-secondary/50 border-y border-border">
