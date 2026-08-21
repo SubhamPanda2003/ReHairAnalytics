@@ -4,8 +4,7 @@ import { useNavigate } from "react-router-dom";
 import { useAuth } from "@/context/AuthContext";
 import { Button } from "@/components/ui/button";
 import { toast } from "sonner";
-import { Activity, Camera, LineChart, ShieldCheck, Sparkles, Ruler, Clock, ArrowRight, Check, Stethoscope, X } from "lucide-react";
-import SampleReportPreview from "@/components/landing/SampleReportPreview";
+import { Activity, Camera, LineChart, ShieldCheck, Sparkles, Ruler, Clock, ArrowRight, Check, Stethoscope, X, Download } from "lucide-react";
 
 // REMINDER: DO NOT HARDCODE THE URL, OR ADD ANY FALLBACKS OR REDIRECT URLS, THIS BREAKS THE AUTH
 const login = () => {
@@ -112,7 +111,15 @@ export default function Landing() {
         </div>
       </section>
 
-      <SampleReportPreview onGetStarted={login} />
+      {/* Sample report */}
+      <section className="max-w-7xl mx-auto px-5 md:px-8 py-10 text-center">
+        <p className="text-muted-foreground mb-3">Curious what a real report looks like?</p>
+        <a href="/sample-report.pdf" download="ReHairAnalytics-Sample-Report.pdf" data-testid="sample-report-download">
+          <Button size="lg" variant="outline" className="rounded-full h-12 px-7 text-base">
+            <Download className="w-4 h-4 mr-1.5" /> Download sample report
+          </Button>
+        </a>
+      </section>
 
       {/* Standardized Photography */}
       <section className="bg-secondary/50 border-y border-border">
