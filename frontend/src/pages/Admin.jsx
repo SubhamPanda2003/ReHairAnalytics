@@ -52,10 +52,17 @@ function ScanCreditRow({ row, onSave }) {
         <p className="text-xs text-muted-foreground">
           {row.email} · {row.scan_count} report{row.scan_count === 1 ? "" : "s"}
           {row.credits_used !== row.scan_count && ` (${row.credits_used} credits used)`}
+          {row.effective_limit != null && ` of ${row.effective_limit}`}
         </p>
       </div>
       <div className="flex items-center gap-3">
-        <Badge variant="secondary" className="rounded-full">{row.credits_used} credit{row.credits_used === 1 ? "" : "s"} used</Badge>
+        {row.effective_limit == null ? (
+          <Badge variant="secondary" className="rounded-full">Unlimited</Badge>
+        ) : (
+          <Badge variant={row.remaining === 0 ? "destructive" : "secondary"} className="rounded-full" data-testid={`credit-remaining-${row.user_id}`}>
+            {row.remaining} remaining
+          </Badge>
+        )}
         <div className="flex items-center gap-1">
           <Button type="button" size="icon" variant="outline" className="rounded-full h-8 w-8" onClick={() => step(-1)}><Minus className="w-3.5 h-3.5" /></Button>
           <Input
@@ -64,6 +71,7 @@ function ScanCreditRow({ row, onSave }) {
             value={value}
             onChange={(e) => setValue(e.target.value.replace(/\D/g, ""))}
             data-testid={`credit-input-${row.user_id}`}
+            aria-label="Credit limit"
           />
           <Button type="button" size="icon" variant="outline" className="rounded-full h-8 w-8" onClick={() => step(1)}><Plus className="w-3.5 h-3.5" /></Button>
         </div>
