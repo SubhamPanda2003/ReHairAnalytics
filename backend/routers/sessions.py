@@ -119,8 +119,9 @@ async def auto_scan(
     if region not in ("full", "crown", "hairline"):
         region = "full"
 
+    cost = quota_service.PRECISION_SCAN_CREDIT_COST if precision else quota_service.SCAN_CREDIT_COST
     limit = await quota_service.effective_limit(user)
-    if limit is not None and await quota_service.scan_count(user["user_id"]) >= limit:
+    if limit is not None and (await quota_service.credits_used(user["user_id"])) + cost > limit:
         settings = await quota_service.get_settings()
         raise HTTPException(status_code=403, detail={
             "code": "scan_limit_reached",
@@ -128,7 +129,7 @@ async def auto_scan(
             "whatsapp_number": settings["whatsapp_number"],
         })
 
-    session = await sessions_service.create_tracking_session(user["user_id"])
+    session = await sessions_service.create_tracking_session(user["user_id"], precision=precision, credits_used=cost)
     session_id = session["id"]
 
     regions_in = frame_regions or []

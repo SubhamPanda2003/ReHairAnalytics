@@ -49,10 +49,13 @@ function ScanCreditRow({ row, onSave }) {
     <div className="rounded-2xl border border-border bg-card p-4 flex flex-wrap items-center justify-between gap-3" data-testid={`credit-${row.user_id}`}>
       <div>
         <p className="font-medium">{row.name || row.email}</p>
-        <p className="text-xs text-muted-foreground">{row.email}</p>
+        <p className="text-xs text-muted-foreground">
+          {row.email} · {row.scan_count} report{row.scan_count === 1 ? "" : "s"}
+          {row.credits_used !== row.scan_count && ` (${row.credits_used} credits used)`}
+        </p>
       </div>
       <div className="flex items-center gap-3">
-        <Badge variant="secondary" className="rounded-full">{row.scan_count} report{row.scan_count === 1 ? "" : "s"}</Badge>
+        <Badge variant="secondary" className="rounded-full">{row.credits_used} credit{row.credits_used === 1 ? "" : "s"} used</Badge>
         <div className="flex items-center gap-1">
           <Button type="button" size="icon" variant="outline" className="rounded-full h-8 w-8" onClick={() => step(-1)}><Minus className="w-3.5 h-3.5" /></Button>
           <Input

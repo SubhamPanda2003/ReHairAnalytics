@@ -88,29 +88,40 @@ async def admin_set_role(target_user_id: str, body: RoleIn, user: CurrentUser):
 
 @router.get("/scan-usage")
 async def admin_scan_usage(user: CurrentUser):
-    """How many reports each user has generated, plus their scan-credit limit
-    (raw per-user override and the effective limit after falling back to the
-    global default). Open to admin + super_admin, unlike /users which stays
+    """How many reports each user has generated (scan_count) and how many
+    credits that actually cost them (credits_used -- precision scans cost
+    more, see services.quota), plus their scan-credit limit (raw per-user
+    override and the effective limit after falling back to the global
+    default). Open to admin + super_admin, unlike /users which stays
     super_admin-only since it also exposes role management."""
     require_roles(user, "admin", "super_admin")
     users = await db.users.find({}, {"_id": 0, "user_id": 1, "email": 1, "name": 1, "role": 1, "scan_limit": 1}).to_list(2000)
-    counts = {
-        row["_id"]: row["count"]
-        for row in await db.tracking_sessions.aggregate([{"$group": {"_id": "$user_id", "count": {"$sum": 1}}}]).to_list(2000)
+    agg = {
+        row["_id"]: row
+        for row in await db.tracking_sessions.aggregate([
+            {"$group": {
+                "_id": "$user_id",
+                "count": {"$sum": 1},
+                "credits": {"$sum": {"$ifNull": ["$credits_used", quota_service.SCAN_CREDIT_COST]}},
+            }},
+        ]).to_list(2000)
     }
     settings = await quota_service.get_settings()
     rows = []
     for u in users:
         u.setdefault("role", "user")
-        scan_count = counts.get(u["user_id"], 0)
+        agg_row = agg.get(u["user_id"], {})
+        scan_count = agg_row.get("count", 0)
+        credits = agg_row.get("credits", 0)
         effective = await quota_service.effective_limit(u)
-        remaining = None if effective is None else max(0, effective - scan_count)
+        remaining = None if effective is None else max(0, effective - credits)
         rows.append({
             "user_id": u["user_id"],
             "name": u.get("name"),
             "email": u.get("email"),
             "role": u["role"],
             "scan_count": scan_count,
+            "credits_used": credits,
             "scan_limit": u.get("scan_limit"),
             "effective_limit": effective,
             "remaining": remaining,

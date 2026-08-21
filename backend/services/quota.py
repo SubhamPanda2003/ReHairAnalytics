@@ -1,5 +1,11 @@
 """Scan-credit quota: global default limit + per-user overrides, and the
-configurable message shown once a user runs out."""
+configurable message shown once a user runs out.
+
+A "scan" and a "credit" aren't 1:1 -- a precision scan (extra ensemble
+re-reads + reference-photo calibration, see routers.sessions.auto_scan)
+costs more than a normal one. scan_count() is the raw number of
+reports/scans generated (what admins see as "reports"); credits_used() is
+what actually gets charged against a user's limit."""
 from typing import Optional
 
 from models.database import db
@@ -17,6 +23,9 @@ DEFAULT_SETTINGS = {
 # value that happens to be sitting on their user doc.
 LIMITED_ROLES = {"user"}
 
+SCAN_CREDIT_COST = 1
+PRECISION_SCAN_CREDIT_COST = 3
+
 
 async def get_settings() -> dict:
     doc = await db.app_settings.find_one({"key": SETTINGS_ID}, {"_id": 0}) or {}
@@ -30,7 +39,25 @@ async def update_settings(patch: dict) -> dict:
 
 
 async def scan_count(user_id: str) -> int:
+    """Raw number of scans/reports generated -- NOT what's charged against
+    the limit once precision scans cost more than a normal one (see
+    credits_used)."""
     return await db.tracking_sessions.count_documents({"user_id": user_id})
+
+
+async def credits_used(user_id: str) -> int:
+    """Total credits actually charged so far. Summed from each session's own
+    stored credits_used (set once, at scan time -- see
+    services.sessions.create_tracking_session), not recomputed from the
+    current cost constants, so a later change to pricing never retroactively
+    reprices old scans. Sessions from before this field existed default to
+    SCAN_CREDIT_COST -- the conservative reading, since there's no way to
+    know in hindsight which of them were precision runs."""
+    rows = await db.tracking_sessions.aggregate([
+        {"$match": {"user_id": user_id}},
+        {"$group": {"_id": None, "total": {"$sum": {"$ifNull": ["$credits_used", SCAN_CREDIT_COST]}}}},
+    ]).to_list(1)
+    return rows[0]["total"] if rows else 0
 
 
 async def effective_limit(user: dict) -> Optional[int]:
@@ -46,12 +73,16 @@ async def effective_limit(user: dict) -> Optional[int]:
 async def quota_for(user: dict) -> dict:
     settings = await get_settings()
     limit = await effective_limit(user)
-    used = await scan_count(user["user_id"])
+    used = await credits_used(user["user_id"])
+    scans = await scan_count(user["user_id"])
     remaining = None if limit is None else max(0, limit - used)
     return {
         "limit": limit,
         "used": used,
+        "scan_count": scans,
         "remaining": remaining,
+        "scan_cost": SCAN_CREDIT_COST,
+        "precision_scan_cost": PRECISION_SCAN_CREDIT_COST,
         "exhausted_message": settings["exhausted_message"],
         "whatsapp_number": settings["whatsapp_number"],
     }

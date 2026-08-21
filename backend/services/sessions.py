@@ -203,11 +203,18 @@ async def _ensemble_frame(frame: dict, session_id: str) -> tuple[dict, Optional[
     return await ensemble_score(b64, view, region, session_id, frame)
 
 
-async def create_tracking_session(user_id: str, notes: str = "") -> dict:
+async def create_tracking_session(user_id: str, notes: str = "", precision: bool = False, credits_used: int = 1) -> dict:
     """Every call creates its own session, identified by a precise timestamp
     (not just a calendar date) -- so scanning again later today doesn't get
     silently merged into this morning's session, and multiple scans on the
-    same day show up as distinct, independently viewable results."""
+    same day show up as distinct, independently viewable results.
+
+    credits_used is stamped on the session at creation time (the caller
+    already knows the cost -- see routers.sessions.auto_scan) and is what
+    services.quota.credits_used later sums per user; storing it here rather
+    than recomputing it from `precision` later means a future change to the
+    cost constants can't silently reprice a scan after the fact.
+    """
     doc = {
         "id": str(uuid.uuid4()),
         "user_id": user_id,
@@ -215,6 +222,8 @@ async def create_tracking_session(user_id: str, notes: str = "") -> dict:
         "notes": notes or "",
         "analyzed": False,
         "processing": False,
+        "precision": precision,
+        "credits_used": credits_used,
     }
     await db.tracking_sessions.insert_one(dict(doc))
     doc.pop("_id", None)

@@ -8,7 +8,7 @@ import { useAuth } from "@/context/AuthContext";
 import Navbar from "@/components/Navbar";
 import { Button } from "@/components/ui/button";
 import { LineChart, Line, AreaChart, Area, ResponsiveContainer, XAxis, YAxis, Tooltip, CartesianGrid } from "recharts";
-import { Flame, ImageIcon, Plus, Camera, ArrowRight, Sparkles, Bell } from "lucide-react";
+import { Flame, ImageIcon, Plus, Camera, ArrowRight, Sparkles, Bell, Zap } from "lucide-react";
 import MetricDelta from "@/components/MetricDelta";
 import TrendBadge from "@/components/TrendBadge";
 
@@ -22,7 +22,7 @@ const Card = ({ children, className = "", delay = 0, ...rest }) => (
 
 export default function Dashboard() {
   const navigate = useNavigate();
-  const { user } = useAuth();
+  const { user, quota } = useAuth();
   const { data: progress, isLoading: progressLoading } = useQuery({ queryKey: ["progress"], queryFn: fetchProgress });
   const { data: timeline, isLoading: timelineLoading } = useQuery({ queryKey: ["timeline"], queryFn: fetchTimeline });
   const isLoading = progressLoading || timelineLoading;
@@ -55,6 +55,28 @@ export default function Dashboard() {
             <Camera className="w-4 h-4 mr-1.5" /> New scan
           </Button>
         </div>
+
+        {quota && (
+          <motion.div initial={{ opacity: 0, y: -8 }} animate={{ opacity: 1, y: 0 }}
+            className="flex flex-wrap items-center gap-3 rounded-2xl border border-border bg-card px-5 py-4 mb-6" data-testid="credit-banner">
+            <Zap className="w-5 h-5 text-primary shrink-0" />
+            {quota.limit != null ? (
+              <div>
+                <p className="text-sm font-medium">
+                  {quota.remaining} credit{quota.remaining === 1 ? "" : "s"} remaining <span className="text-muted-foreground font-normal">of {quota.limit}</span>
+                </p>
+                <p className="text-xs text-muted-foreground">
+                  {quota.scan_count} scan{quota.scan_count === 1 ? "" : "s"} done · a normal scan costs {quota.scan_cost} credit, a precision scan costs {quota.precision_scan_cost}
+                </p>
+              </div>
+            ) : (
+              <div>
+                <p className="text-sm font-medium">Unlimited scans</p>
+                <p className="text-xs text-muted-foreground">{quota.scan_count} scan{quota.scan_count === 1 ? "" : "s"} done</p>
+              </div>
+            )}
+          </motion.div>
+        )}
 
         {due && (
           <motion.div initial={{ opacity: 0, y: -8 }} animate={{ opacity: 1, y: 0 }}
