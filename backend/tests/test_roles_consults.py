@@ -178,6 +178,84 @@ class TestDermatologistLifecycle:
         assert actors["sa"][2].post(f"{API}/admin/dermatologists/{uid}/approve").status_code == 200
 
 
+# ---------------------------------------------------- derm deletion (admin)
+class TestDermatologistDeletion:
+    payload = {
+        "name": "TEST Dr. Delete Me",
+        "specialty": "Trichology",
+        "years_experience": 5,
+        "bio": "",
+        "photo": "",
+        "meeting_link": "https://meet.google.com/test-del-xyz",
+        "price": "$40",
+    }
+
+    @pytest.fixture(scope="class")
+    def own_derm(self, db):
+        uid, _, c = _seed(db, "dermdelete")
+        yield uid, c
+        db.users.delete_many({"user_id": uid})
+        db.user_sessions.delete_many({"user_id": uid})
+        db.dermatologist_profiles.delete_many({"user_id": uid})
+
+    @pytest.fixture(scope="class")
+    def own_patient(self, db):
+        uid, _, c = _seed(db, "dermdeletepatient")
+        yield uid, c
+        db.users.delete_many({"user_id": uid})
+        db.user_sessions.delete_many({"user_id": uid})
+        db.appointments.delete_many({"patient_id": uid})
+
+    def test_00_setup_approved_derm_with_appointment(self, actors, own_derm, own_patient):
+        uid, c = own_derm
+        r = c.post(f"{API}/derm/register", json=self.payload)
+        assert r.status_code == 200, r.text
+        assert actors["sa"][2].post(f"{API}/admin/dermatologists/{uid}/approve").status_code == 200
+        when = (datetime.now(timezone.utc) + timedelta(days=2)).isoformat()
+        ar = own_patient[1].post(f"{API}/appointments", json={
+            "dermatologist_id": uid, "requested_time": when, "note": "TEST pre-delete booking",
+        })
+        assert ar.status_code == 200, ar.text
+        type(self).appt_id = ar.json()["id"]
+
+    def test_01_plain_user_forbidden(self, actors, own_derm):
+        r = actors["user"][2].delete(f"{API}/admin/dermatologists/{own_derm[0]}")
+        assert r.status_code == 403, r.text
+
+    def test_02_unknown_user_404(self, actors):
+        r = actors["sa"][2].delete(f"{API}/admin/dermatologists/no-such-uid")
+        assert r.status_code == 404, r.text
+
+    def test_03_admin_deletes_derm(self, actors, own_derm, db):
+        uid = own_derm[0]
+        r = actors["sa"][2].delete(f"{API}/admin/dermatologists/{uid}")
+        assert r.status_code == 200, r.text
+        assert r.json() == {"deleted": True, "user_id": uid}
+
+        assert db.dermatologist_profiles.find_one({"user_id": uid}) is None
+        pub = actors["user"][2].get(f"{API}/dermatologists").json()
+        assert all(d["user_id"] != uid for d in pub), "deleted derm still in public list"
+        admin_list = actors["sa"][2].get(f"{API}/admin/dermatologists").json()
+        assert all(d["user_id"] != uid for d in admin_list), "deleted derm still in admin list"
+
+    def test_04_role_reverted_to_user(self, own_derm):
+        me = own_derm[1].get(f"{API}/auth/me").json()
+        assert me["role"] == "user", me
+
+    def test_05_derm_me_now_empty(self, own_derm):
+        r = own_derm[1].get(f"{API}/derm/me")
+        assert r.status_code == 200, r.text
+        assert r.json() == {}
+
+    def test_06_pending_appointment_cancelled(self, db):
+        appt = db.appointments.find_one({"id": self.appt_id}, {"_id": 0})
+        assert appt["status"] == "cancelled", appt
+
+    def test_07_delete_again_404(self, actors, own_derm):
+        r = actors["sa"][2].delete(f"{API}/admin/dermatologists/{own_derm[0]}")
+        assert r.status_code == 404, r.text
+
+
 # ------------------------------------------------------- admin user mgmt
 class TestAdminUsers:
     def test_list_users_super_admin(self, actors):

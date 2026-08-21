@@ -10,8 +10,12 @@ import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
+import {
+  AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription,
+  AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import { toast } from "sonner";
-import { ShieldCheck, Check, X, Loader2, Stethoscope, UserCog, Crown, Zap, Minus, Plus } from "lucide-react";
+import { ShieldCheck, Check, X, Loader2, Stethoscope, UserCog, Crown, Zap, Minus, Plus, Trash2 } from "lucide-react";
 
 const ROLE_LABELS = {
   super_admin: ["Super admin", "bg-primary/15 text-primary"],
@@ -74,6 +78,7 @@ export default function Admin() {
   const qc = useQueryClient();
   const isSuper = user?.role === "super_admin";
   const isAdmin = user?.role === "admin" || isSuper;
+  const [dermToDelete, setDermToDelete] = useState(null);
 
   const { data: derms, isLoading } = useQuery({ queryKey: ["admin-derms"], queryFn: async () => (await api.get("/admin/dermatologists")).data, enabled: isAdmin });
   const { data: users } = useQuery({ queryKey: ["admin-users"], queryFn: async () => (await api.get("/admin/users")).data, enabled: isSuper });
@@ -96,6 +101,18 @@ export default function Admin() {
   const setStatus = async (uid, action) => {
     try { await api.post(`/admin/dermatologists/${uid}/${action}`); toast.success(`Dermatologist ${action}d`); qc.invalidateQueries({ queryKey: ["admin-derms"] }); }
     catch (e) { toast.error("Action failed"); }
+  };
+  const deleteDerm = async () => {
+    const uid = dermToDelete.user_id;
+    try {
+      await api.delete(`/admin/dermatologists/${uid}`);
+      toast.success(`${dermToDelete.name || "Dermatologist"} deleted`);
+      qc.invalidateQueries({ queryKey: ["admin-derms"] });
+    } catch (e) {
+      toast.error(e.response?.data?.detail || "Could not delete dermatologist");
+    } finally {
+      setDermToDelete(null);
+    }
   };
   const setRole = async (uid, role) => {
     try { await api.post(`/admin/users/${uid}/role`, { role }); toast.success(`Role set to ${role}`); qc.invalidateQueries({ queryKey: ["admin-users"] }); }
@@ -161,6 +178,7 @@ export default function Admin() {
                         <div className="flex items-center gap-2">
                           <Button size="sm" className="rounded-full" onClick={() => setStatus(d.user_id, "approve")} data-testid={`approve-${d.user_id}`}><Check className="w-4 h-4 mr-1" /> Approve</Button>
                           <Button size="sm" variant="outline" className="rounded-full" onClick={() => setStatus(d.user_id, "reject")} data-testid={`reject-${d.user_id}`}><X className="w-4 h-4 mr-1" /> Reject</Button>
+                          <Button size="icon" variant="outline" className="rounded-full h-8 w-8 text-destructive hover:bg-destructive hover:text-destructive-foreground" onClick={() => setDermToDelete(d)} aria-label={`Delete ${d.name}`} data-testid={`delete-derm-${d.user_id}`}><Trash2 className="w-3.5 h-3.5" /></Button>
                         </div>
                       </div>
                     ))}
@@ -177,6 +195,7 @@ export default function Admin() {
                           <Badge variant="secondary" className="rounded-full capitalize">{d.status}</Badge>
                           {d.status !== "approved" && <Button size="sm" className="rounded-full" onClick={() => setStatus(d.user_id, "approve")}>Approve</Button>}
                           {d.status === "approved" && <Button size="sm" variant="outline" className="rounded-full" onClick={() => setStatus(d.user_id, "reject")}>Revoke</Button>}
+                          <Button size="icon" variant="outline" className="rounded-full h-8 w-8 text-destructive hover:bg-destructive hover:text-destructive-foreground" onClick={() => setDermToDelete(d)} aria-label={`Delete ${d.name}`} data-testid={`delete-derm-${d.user_id}`}><Trash2 className="w-3.5 h-3.5" /></Button>
                         </div>
                       </div>
                     ))}
@@ -238,6 +257,28 @@ export default function Admin() {
           )}
         </Tabs>
       </main>
+
+      <AlertDialog open={!!dermToDelete} onOpenChange={(o) => !o && setDermToDelete(null)}>
+        <AlertDialogContent className="rounded-3xl">
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete {dermToDelete?.name}?</AlertDialogTitle>
+            <AlertDialogDescription>
+              This permanently removes their profile from the directory and reverts their account back to a regular user.
+              Any pending or confirmed appointments with them will be cancelled. This cannot be undone.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel className="rounded-full" data-testid="delete-derm-cancel">Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={deleteDerm}
+              className="rounded-full bg-destructive text-destructive-foreground hover:bg-destructive/90"
+              data-testid="delete-derm-confirm"
+            >
+              Delete
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }

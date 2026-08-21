@@ -38,6 +38,31 @@ async def admin_reject_derm(derm_user_id: str, user: CurrentUser):
     return {"status": "rejected"}
 
 
+@router.delete("/dermatologists/{derm_user_id}")
+async def admin_delete_derm(derm_user_id: str, user: CurrentUser):
+    """Permanently removes a dermatologist's profile (pending, approved, or
+    rejected). Reverts their account role back to "user" -- mirrors
+    derm_register's own promotion, and avoids leaving them stuck as
+    role="dermatologist" with no profile behind it (derm/me would return
+    {}, derm-only pages would have nothing to show). Any of their
+    appointments still requested/confirmed get cancelled rather than left
+    pointing at a dermatologist who no longer exists; already-declined or
+    -cancelled ones are left alone since there's nothing live to clean up."""
+    require_roles(user, "admin", "super_admin")
+    derm = await db.dermatologist_profiles.find_one({"user_id": derm_user_id}, {"_id": 0})
+    if not derm:
+        raise HTTPException(status_code=404, detail="Dermatologist not found")
+    await db.dermatologist_profiles.delete_one({"user_id": derm_user_id})
+    target = await db.users.find_one({"user_id": derm_user_id}, {"_id": 0})
+    if target and target.get("role") == "dermatologist":
+        await db.users.update_one({"user_id": derm_user_id}, {"$set": {"role": "user"}})
+    await db.appointments.update_many(
+        {"dermatologist_id": derm_user_id, "status": {"$in": ["requested", "confirmed"]}},
+        {"$set": {"status": "cancelled"}},
+    )
+    return {"deleted": True, "user_id": derm_user_id}
+
+
 @router.get("/users")
 async def admin_list_users(user: CurrentUser):
     require_roles(user, "super_admin")
