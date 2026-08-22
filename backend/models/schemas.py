@@ -61,3 +61,7 @@ class CoachAssignIn(BaseModel):
 
 class CoachShareIn(BaseModel):
     share: bool
+
+
+class CoachNoteIn(BaseModel):
+    text: str

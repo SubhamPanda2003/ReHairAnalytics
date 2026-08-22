@@ -66,6 +66,7 @@ def actors(db):
     for uid in created:
         db.users.delete_many({"user_id": uid})
         db.user_sessions.delete_many({"user_id": uid})
+        db.coach_notes.delete_many({"$or": [{"patient_id": uid}, {"coach_id": uid}]})
 
 
 def _assign(client, target_uid, coach_uid):
@@ -209,4 +210,76 @@ class TestCoachSharingAndReport:
 
     def test_plain_user_role_forbidden_from_coach_endpoints(self, actors):
         r = actors["user_a"][2].get(f"{API}/coach/patients")
+        assert r.status_code == 403, r.text
+
+
+# --------------------------------------------------------- per-scan comments
+class TestCoachNotes:
+    @pytest.fixture(scope="class")
+    def paired(self, db, actors):
+        """Isolated user + their coach + an unrelated second coach, with one
+        real tracking_session already sitting there to comment on."""
+        user = _seed(db, "coachnoteuser")
+        coach = _seed(db, "coachnoteCoach", role="coach")
+        other_coach = _seed(db, "coachnoteOther", role="coach")
+        session_id = f"TEST_session_{user[0]}_{uuid.uuid4().hex[:8]}"
+        db.tracking_sessions.insert_one({
+            "id": session_id,
+            "user_id": user[0],
+            "date": datetime.now(timezone.utc).isoformat(),
+            "created_at": datetime.now(timezone.utc).isoformat(),
+        })
+        assert actors["sa"][2].post(f"{API}/admin/users/{user[0]}/coach", json={"coach_id": coach[0]}).status_code == 200
+        assert user[2].post(f"{API}/coach/share", json={"share": True}).status_code == 200
+        yield {"user": user, "coach": coach, "other_coach": other_coach, "session_id": session_id}
+        for uid in (user[0], coach[0], other_coach[0]):
+            db.users.delete_many({"user_id": uid})
+            db.user_sessions.delete_many({"user_id": uid})
+            db.coach_notes.delete_many({"$or": [{"patient_id": uid}, {"coach_id": uid}]})
+        db.tracking_sessions.delete_many({"id": session_id})
+
+    def test_01_coach_adds_note(self, paired):
+        coach_client, user_uid, session_id = paired["coach"][2], paired["user"][0], paired["session_id"]
+        r = coach_client.post(
+            f"{API}/coach/patients/{user_uid}/sessions/{session_id}/notes",
+            json={"text": "Crown region looks a bit patchy, keep an eye on it."},
+        )
+        assert r.status_code == 200, r.text
+        body = r.json()
+        assert body["text"] == "Crown region looks a bit patchy, keep an eye on it."
+        assert body["tracking_session_id"] == session_id
+
+    def test_02_note_visible_to_owner_on_timeline(self, paired):
+        user_client, coach_client, session_id = paired["user"][2], paired["coach"][2], paired["session_id"]
+        r = user_client.get(f"{API}/timeline")
+        assert r.status_code == 200, r.text
+        s = next(s for s in r.json() if s["id"] == session_id)
+        assert len(s["coach_notes"]) == 1
+        assert s["coach_notes"][0]["coach_name"] == coach_client.get(f"{API}/auth/me").json()["name"]
+
+    def test_03_note_visible_to_coach_on_patient_timeline(self, paired):
+        coach_client, user_uid, session_id = paired["coach"][2], paired["user"][0], paired["session_id"]
+        r = coach_client.get(f"{API}/coach/patients/{user_uid}/timeline")
+        assert r.status_code == 200, r.text
+        s = next(s for s in r.json() if s["id"] == session_id)
+        assert len(s["coach_notes"]) == 1
+
+    def test_empty_text_400(self, paired):
+        coach_client, user_uid, session_id = paired["coach"][2], paired["user"][0], paired["session_id"]
+        r = coach_client.post(f"{API}/coach/patients/{user_uid}/sessions/{session_id}/notes", json={"text": "   "})
+        assert r.status_code == 400, r.text
+
+    def test_unknown_session_404(self, paired):
+        coach_client, user_uid = paired["coach"][2], paired["user"][0]
+        r = coach_client.post(f"{API}/coach/patients/{user_uid}/sessions/TEST_not_a_real_session/notes", json={"text": "hi"})
+        assert r.status_code == 404, r.text
+
+    def test_unrelated_coach_cannot_add_note(self, paired):
+        other_coach_client, user_uid, session_id = paired["other_coach"][2], paired["user"][0], paired["session_id"]
+        r = other_coach_client.post(f"{API}/coach/patients/{user_uid}/sessions/{session_id}/notes", json={"text": "sneaky"})
+        assert r.status_code == 403, r.text
+
+    def test_plain_user_cannot_add_note(self, paired, actors):
+        user_uid, session_id = paired["user"][0], paired["session_id"]
+        r = actors["user_a"][2].post(f"{API}/coach/patients/{user_uid}/sessions/{session_id}/notes", json={"text": "not a coach"})
         assert r.status_code == 403, r.text

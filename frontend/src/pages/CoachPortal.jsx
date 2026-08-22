@@ -1,17 +1,20 @@
 import React, { useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { api, fileUrl } from "@/lib/api";
 import { fmtScore } from "@/lib/scores";
 import { useAuth } from "@/context/AuthContext";
 import Navbar from "@/components/Navbar";
 import { Button } from "@/components/ui/button";
+import { Textarea } from "@/components/ui/textarea";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { toast } from "sonner";
 import { Users, Loader2, ImageOff, FileText } from "lucide-react";
 
 export default function CoachPortal() {
   const { user } = useAuth();
   const navigate = useNavigate();
+  const qc = useQueryClient();
   const { data: patients, isLoading } = useQuery({
     queryKey: ["coach-patients"],
     queryFn: async () => (await api.get("/coach/patients")).data,
@@ -23,6 +26,30 @@ export default function CoachPortal() {
     queryFn: async () => (await api.get(`/coach/patients/${openPatientId}/report`)).data,
     enabled: !!openPatientId,
   });
+  const { data: sessions, isLoading: sessionsLoading } = useQuery({
+    queryKey: ["coach-patient-timeline", openPatientId],
+    queryFn: async () => (await api.get(`/coach/patients/${openPatientId}/timeline`)).data,
+    enabled: !!openPatientId,
+  });
+
+  const [drafts, setDrafts] = useState({}); // session_id -> draft text
+  const [posting, setPosting] = useState(null); // session_id currently being posted
+
+  const addNote = async (sessionId) => {
+    const text = (drafts[sessionId] || "").trim();
+    if (!text) return;
+    setPosting(sessionId);
+    try {
+      await api.post(`/coach/patients/${openPatientId}/sessions/${sessionId}/notes`, { text });
+      setDrafts((d) => ({ ...d, [sessionId]: "" }));
+      qc.invalidateQueries({ queryKey: ["coach-patient-timeline", openPatientId] });
+      toast.success("Comment added");
+    } catch (e) {
+      toast.error(e.response?.data?.detail || "Could not add comment");
+    } finally {
+      setPosting(null);
+    }
+  };
 
   if (user?.role !== "coach") {
     return (
@@ -94,15 +121,57 @@ export default function CoachPortal() {
               </div>
 
               <div>
-                <p className="text-xs uppercase tracking-wider text-muted-foreground mb-2">Most recent photos</p>
-                {Object.keys(report.recent_photos || {}).length === 0 ? (
-                  <p className="text-sm text-muted-foreground flex items-center gap-1.5"><ImageOff className="w-4 h-4" /> No photos yet</p>
+                <p className="text-xs uppercase tracking-wider text-muted-foreground mb-3">Timeline & comments</p>
+                {sessionsLoading ? (
+                  <div className="flex justify-center py-8"><Loader2 className="w-5 h-5 animate-spin text-primary" /></div>
+                ) : (sessions || []).length === 0 ? (
+                  <p className="text-sm text-muted-foreground flex items-center gap-1.5"><ImageOff className="w-4 h-4" /> No scans yet</p>
                 ) : (
-                  <div className="grid grid-cols-3 gap-2">
-                    {Object.entries(report.recent_photos).map(([region, path]) => (
-                      <div key={region} className="rounded-xl overflow-hidden border border-border aspect-square relative" data-testid={`report-photo-${region}`}>
-                        <img src={fileUrl(path)} alt={region} className="w-full h-full object-cover" />
-                        <span className="absolute bottom-1 left-1 text-[10px] font-medium px-1.5 py-0.5 rounded-full bg-black/60 text-white capitalize">{region}</span>
+                  <div className="space-y-3 max-h-96 overflow-y-auto pr-1">
+                    {[...sessions].reverse().map((s) => (
+                      <div key={s.id} className="rounded-xl border border-border bg-secondary/30 p-3" data-testid={`coach-session-${s.id}`}>
+                        <div className="flex items-center gap-3 mb-2">
+                          {s.images?.[0] ? (
+                            <img src={fileUrl(s.images[0].thumb_path)} alt="" className="w-10 h-10 rounded-lg object-cover shrink-0" />
+                          ) : (
+                            <div className="w-10 h-10 rounded-lg bg-muted flex items-center justify-center shrink-0"><ImageOff className="w-4 h-4 text-muted-foreground" /></div>
+                          )}
+                          <div className="min-w-0 flex-1">
+                            <p className="text-sm font-medium">{new Date(s.date).toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" })}</p>
+                            {s.analysis ? (
+                              <p className="text-xs text-muted-foreground">Density {fmtScore(s.analysis.density_score)} · Coverage {fmtScore(s.analysis.coverage_score)} · Overall {fmtScore(s.analysis.overall_score)}</p>
+                            ) : <p className="text-xs text-muted-foreground">Not analyzed</p>}
+                          </div>
+                        </div>
+
+                        {(s.coach_notes || []).length > 0 && (
+                          <div className="space-y-1.5 mb-2">
+                            {s.coach_notes.map((n) => (
+                              <div key={n.id} className="rounded-lg bg-card border border-border px-3 py-1.5 text-sm" data-testid={`coach-note-${n.id}`}>
+                                <p>{n.text}</p>
+                                <p className="text-[10px] text-muted-foreground mt-0.5">{n.coach_name || "Coach"} · {new Date(n.created_at).toLocaleDateString()}</p>
+                              </div>
+                            ))}
+                          </div>
+                        )}
+
+                        <div className="flex items-center gap-2">
+                          <Textarea
+                            value={drafts[s.id] || ""}
+                            onChange={(e) => setDrafts((d) => ({ ...d, [s.id]: e.target.value }))}
+                            placeholder="Add a comment on this scan…"
+                            className="rounded-xl text-sm min-h-9 h-9 py-2 resize-none"
+                            data-testid={`coach-note-input-${s.id}`}
+                          />
+                          <Button
+                            size="sm" className="rounded-full shrink-0"
+                            disabled={posting === s.id || !(drafts[s.id] || "").trim()}
+                            onClick={() => addNote(s.id)}
+                            data-testid={`coach-note-submit-${s.id}`}
+                          >
+                            {posting === s.id ? <Loader2 className="w-4 h-4 animate-spin" /> : "Post"}
+                          </Button>
+                        </div>
                       </div>
                     ))}
                   </div>

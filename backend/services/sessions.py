@@ -459,6 +459,23 @@ async def attach_children(sessions: list[dict]) -> list[dict]:
     return sessions
 
 
+async def attach_coach_notes(sessions: list[dict]) -> list[dict]:
+    """Hydrate each tracking session with any hair-coach comments left on it
+    (see routers/coach.py's /patients/{id}/sessions/{id}/notes) -- shared by
+    the owner's own /timeline and the coach's /patients/{id}/timeline so both
+    sides see the same thread."""
+    ids = [s["id"] for s in sessions]
+    if not ids:
+        return sessions
+    notes = await db.coach_notes.find({"tracking_session_id": {"$in": ids}}, {"_id": 0}).sort("created_at", 1).to_list(5000)
+    by_session: dict[str, list[dict]] = {}
+    for n in notes:
+        by_session.setdefault(n["tracking_session_id"], []).append(n)
+    for s in sessions:
+        s["coach_notes"] = by_session.get(s["id"], [])
+    return sessions
+
+
 _BLEND_KEYS = ("density_score", "coverage_score", "overall_score", "confidence",
                "quality_score", "visible_scalp_pct", "hair_coverage_pct")
 
