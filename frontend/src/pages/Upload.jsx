@@ -6,7 +6,7 @@ import { api } from "@/lib/api";
 import Navbar from "@/components/Navbar";
 import { Button } from "@/components/ui/button";
 import { toast } from "sonner";
-import { Gauge, Loader2, Scan, Sparkles, UploadCloud } from "lucide-react";
+import { Gauge, Loader2, Scan, ShieldCheck, Sparkles, UploadCloud } from "lucide-react";
 import AutoScan from "@/components/upload/AutoScan";
 import ViewSlot from "@/components/upload/ViewSlot";
 import RegionCaptureOverlay from "@/components/upload/RegionCaptureOverlay";
@@ -91,6 +91,9 @@ export default function UploadPage() {
         <div className="mb-6">
           <h1 className="font-heading text-3xl font-bold tracking-tight">New scan</h1>
           <p className="text-muted-foreground mt-1">Auto-scan sweeps through every region in one go. Manual lets you capture (or upload) each region yourself.</p>
+          <p className="flex items-center gap-1.5 text-xs text-muted-foreground mt-2" data-testid="upload-privacy-note">
+            <ShieldCheck className="w-3.5 h-3.5 shrink-0" /> Private to your account, used only for your measurements — delete any photo anytime in Settings.
+          </p>
         </div>
 
         <div className="flex flex-wrap items-center justify-between gap-3 mb-6">

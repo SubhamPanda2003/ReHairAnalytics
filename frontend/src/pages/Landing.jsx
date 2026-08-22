@@ -4,7 +4,7 @@ import { useNavigate } from "react-router-dom";
 import { useAuth } from "@/context/AuthContext";
 import { Button } from "@/components/ui/button";
 import { toast } from "sonner";
-import { Activity, Camera, LineChart, ShieldCheck, Sparkles, Ruler, Clock, ArrowRight, Check, Stethoscope, X, Download } from "lucide-react";
+import { Activity, Camera, LineChart, ShieldCheck, Sparkles, Ruler, Clock, ArrowRight, Check, Stethoscope, X, Download, Lock, Trash2 } from "lucide-react";
 
 // REMINDER: DO NOT HARDCODE THE URL, OR ADD ANY FALLBACKS OR REDIRECT URLS, THIS BREAKS THE AUTH
 const login = () => {
@@ -13,10 +13,15 @@ const login = () => {
 };
 
 const features = [
-  { icon: Camera, title: "Standardized Capture", desc: "Ghost-silhouette overlay guides you to shoot the same angle, distance and lighting every week." },
   { icon: Ruler, title: "Objective Measurement", desc: "AI estimates density, coverage and hairline position on a consistent 0–100 scale." },
   { icon: LineChart, title: "Trends Over Time", desc: "Interactive charts turn each weekly scan into a clear, comparable milestone." },
   { icon: Sparkles, title: "Plain-Language Insights", desc: "A concise, non-diagnostic summary explains exactly what changed between photos." },
+];
+
+const privacyPoints = [
+  { icon: Lock, title: "Only you can see it", desc: "Every photo request is checked against your account — no public links, no other user can browse your gallery." },
+  { icon: ShieldCheck, title: "Never sold or shared", desc: "Photos are used only to generate your own measurements. They're visible to a dermatologist only if you personally choose to share your history with them." },
+  { icon: Trash2, title: "Delete anytime", desc: "Remove any photo permanently from Settings whenever you want — no waiting, no support ticket." },
 ];
 
 const steps = [
@@ -121,6 +126,29 @@ export default function Landing() {
         </a>
       </section>
 
+      {/* Privacy */}
+      <section className="max-w-7xl mx-auto px-5 md:px-8 py-16">
+        <div className="text-center max-w-2xl mx-auto mb-10">
+          <div className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full bg-accent text-accent-foreground text-xs font-semibold mb-4">
+            <ShieldCheck className="w-3.5 h-3.5" /> Your photos, protected
+          </div>
+          <h2 className="font-heading text-2xl sm:text-3xl lg:text-4xl font-semibold tracking-tight mb-3">Private by default</h2>
+          <p className="text-muted-foreground leading-relaxed">A scalp photo is personal. Here's exactly how yours is handled.</p>
+        </div>
+        <div className="grid sm:grid-cols-3 gap-6 max-w-4xl mx-auto">
+          {privacyPoints.map((p, i) => (
+            <motion.div key={p.title} initial={{ opacity: 0, y: 16 }} whileInView={{ opacity: 1, y: 0 }} viewport={{ once: true }} transition={{ delay: i * 0.05 }}
+              className="rounded-2xl border border-border bg-card p-6">
+              <div className="w-11 h-11 rounded-xl bg-accent flex items-center justify-center mb-4">
+                <p.icon className="w-5 h-5 text-accent-foreground" />
+              </div>
+              <h3 className="font-heading font-semibold text-lg mb-1.5">{p.title}</h3>
+              <p className="text-sm text-muted-foreground leading-relaxed">{p.desc}</p>
+            </motion.div>
+          ))}
+        </div>
+      </section>
+
       {/* Standardized Photography */}
       <section className="bg-secondary/50 border-y border-border">
         <div className="max-w-7xl mx-auto px-5 md:px-8 py-20">
@@ -180,7 +208,7 @@ export default function Landing() {
       <section className="max-w-7xl mx-auto px-5 md:px-8 py-20">
         <h2 className="font-heading text-2xl sm:text-3xl lg:text-4xl font-semibold tracking-tight mb-3">Built for consistency</h2>
         <p className="text-muted-foreground max-w-2xl mb-12">Everything you need to measure change reliably — the enemy of accurate tracking is inconsistency, so we designed around it.</p>
-        <div className="grid md:grid-cols-2 lg:grid-cols-4 gap-6">
+        <div className="grid md:grid-cols-3 gap-6">
           {features.map((f, i) => (
             <motion.div key={f.title} initial={{ opacity: 0, y: 20 }} whileInView={{ opacity: 1, y: 0 }} viewport={{ once: true }} transition={{ delay: i * 0.05 }}
               className="rounded-2xl border border-border bg-card p-6 hover:-translate-y-1 transition-transform duration-200">
@@ -191,43 +219,6 @@ export default function Landing() {
               <p className="text-sm text-muted-foreground leading-relaxed">{f.desc}</p>
             </motion.div>
           ))}
-        </div>
-      </section>
-
-      {/* Track + Consult */}
-      <section className="max-w-7xl mx-auto px-5 md:px-8 py-20">
-        <div className="text-center max-w-2xl mx-auto mb-12">
-          <div className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full bg-accent text-accent-foreground text-xs font-semibold mb-4">
-            <Stethoscope className="w-3.5 h-3.5" /> Beyond tracking
-          </div>
-          <h2 className="font-heading text-2xl sm:text-3xl lg:text-4xl font-semibold tracking-tight mb-3">A trend on its own doesn't treat hair loss.</h2>
-          <p className="text-muted-foreground leading-relaxed">
-            ReHairAnalytics doesn't stop at a chart. Once you have a real trend, bring it into a real conversation — book a dermatologist directly in the app and walk in with evidence, not just a feeling that something's changed.
-          </p>
-        </div>
-        <div className="grid sm:grid-cols-2 gap-6 max-w-3xl mx-auto">
-          <motion.div initial={{ opacity: 0, y: 16 }} whileInView={{ opacity: 1, y: 0 }} viewport={{ once: true }}
-            className="rounded-2xl border border-border bg-card p-6">
-            <div className="flex items-center gap-2 mb-4 text-primary font-semibold text-sm">
-              <LineChart className="w-4 h-4" /> 1. Track
-            </div>
-            <ul className="text-xs text-muted-foreground space-y-1.5">
-              <li>Weekly standardized scans</li>
-              <li>Objective density, coverage & hairline scores</li>
-              <li>A trend you can actually trust</li>
-            </ul>
-          </motion.div>
-          <motion.div initial={{ opacity: 0, y: 16 }} whileInView={{ opacity: 1, y: 0 }} viewport={{ once: true }} transition={{ delay: 0.08 }}
-            className="rounded-2xl border border-primary/30 bg-card p-6">
-            <div className="flex items-center gap-2 mb-4 text-primary font-semibold text-sm">
-              <Stethoscope className="w-4 h-4" /> 2. Consult
-            </div>
-            <ul className="text-xs text-muted-foreground space-y-1.5">
-              <li>Browse trusted, vetted dermatologists</li>
-              <li>Book a consultation in a few taps</li>
-              <li>Bring your tracked history to the conversation</li>
-            </ul>
-          </motion.div>
         </div>
       </section>
 
