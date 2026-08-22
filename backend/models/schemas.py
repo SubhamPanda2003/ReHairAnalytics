@@ -53,3 +53,11 @@ class SettingsIn(BaseModel):
     default_scan_limit: Optional[int] = None
     exhausted_message: Optional[str] = None
     whatsapp_number: Optional[str] = None
+
+
+class CoachAssignIn(BaseModel):
+    coach_id: Optional[str] = None
+
+
+class CoachShareIn(BaseModel):
+    share: bool

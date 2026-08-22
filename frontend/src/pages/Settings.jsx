@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { api, fileUrl } from "@/lib/api";
 import { useAuth } from "@/context/AuthContext";
 import Navbar from "@/components/Navbar";
@@ -11,13 +12,15 @@ import {
   AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger,
 } from "@/components/ui/alert-dialog";
 import { toast } from "sonner";
-import { Moon, Download, ImageDown, Trash2, ShieldCheck, Ruler, Loader2, Bell } from "lucide-react";
+import { Moon, Download, ImageDown, Trash2, ShieldCheck, Ruler, Loader2, Bell, UserRound } from "lucide-react";
 
 const DAYS = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
 
 export default function Settings() {
   const navigate = useNavigate();
   const { user, logout } = useAuth();
+  const qc = useQueryClient();
+  const { data: coachInfo } = useQuery({ queryKey: ["my-coach"], queryFn: async () => (await api.get("/coach/mine")).data });
   const [dark, setDark] = useState(document.documentElement.classList.contains("dark"));
   const [units, setUnits] = useState(localStorage.getItem("units") || "metric");
   const [busy, setBusy] = useState(false);
@@ -68,6 +71,14 @@ export default function Settings() {
       toast.success(`Downloaded ${imgs.length} images`);
     } catch (e) { toast.error("Download failed"); }
     setBusy(false);
+  };
+
+  const toggleCoachShare = async (share) => {
+    try {
+      await api.post("/coach/share", { share });
+      qc.invalidateQueries({ queryKey: ["my-coach"] });
+      toast.success(share ? "Now sharing reports with your coach" : "Sharing turned off");
+    } catch (e) { toast.error("Could not update sharing"); }
   };
 
   const deleteAccount = async () => {
@@ -135,6 +146,21 @@ export default function Settings() {
         <div className="rounded-2xl border border-border bg-card px-6 mb-6">
           <Row icon={ShieldCheck} title="Privacy" desc="Your photos are private and used only for your measurements." testId="setting-privacy">
             <span className="text-xs text-muted-foreground">Private</span>
+          </Row>
+          <Row
+            icon={UserRound}
+            title="Hair coach"
+            desc={coachInfo?.coach ? `Assigned: ${coachInfo.coach.name || "your coach"}. Sharing is opt-in and off unless you turn it on.` : "No coach assigned yet — check back once your admin pairs you with one."}
+            testId="setting-coach"
+          >
+            {coachInfo?.coach ? (
+              <div className="flex items-center gap-2">
+                <span className="text-xs text-muted-foreground">Share reports</span>
+                <Switch checked={!!coachInfo.share_with_coach} onCheckedChange={toggleCoachShare} data-testid="coach-share-switch" />
+              </div>
+            ) : (
+              <span className="text-xs text-muted-foreground">Not assigned</span>
+            )}
           </Row>
         </div>
 

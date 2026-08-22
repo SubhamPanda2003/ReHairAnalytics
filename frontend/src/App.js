@@ -17,6 +17,7 @@ import Settings from "@/pages/Settings";
 import Report from "@/pages/Report";
 import Dermatologists from "@/pages/Dermatologists";
 import DermPractice from "@/pages/DermPractice";
+import CoachPortal from "@/pages/CoachPortal";
 import Admin from "@/pages/Admin";
 import NotFound from "@/pages/NotFound";
 
@@ -36,6 +37,7 @@ function AppRouter() {
       <Route path="/report" element={<ProtectedRoute><Report /></ProtectedRoute>} />
       <Route path="/dermatologists" element={<ProtectedRoute><Dermatologists /></ProtectedRoute>} />
       <Route path="/derm" element={<ProtectedRoute><DermPractice /></ProtectedRoute>} />
+      <Route path="/coach" element={<ProtectedRoute><CoachPortal /></ProtectedRoute>} />
       <Route path="/admin" element={<ProtectedRoute><Admin /></ProtectedRoute>} />
       <Route path="/settings" element={<ProtectedRoute><Settings /></ProtectedRoute>} />
       <Route path="*" element={<NotFound />} />

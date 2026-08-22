@@ -2,7 +2,7 @@ import React from "react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
 import { useAuth } from "@/context/AuthContext";
 import { Button } from "@/components/ui/button";
-import { Activity, LayoutDashboard, Upload, LineChart, Settings, LogOut, Stethoscope, ShieldCheck } from "lucide-react";
+import { Activity, LayoutDashboard, Upload, LineChart, Settings, LogOut, Stethoscope, ShieldCheck, Users } from "lucide-react";
 
 const baseLinks = [
   { to: "/dashboard", label: "Dashboard", icon: LayoutDashboard, id: "nav-dashboard" },
@@ -19,6 +19,7 @@ export default function Navbar() {
   const role = user?.role || "user";
   const links = [...baseLinks];
   if (role === "dermatologist" || user?.is_dermatologist) links.push({ to: "/derm", label: "Practice", icon: Stethoscope, id: "nav-practice" });
+  if (role === "coach") links.push({ to: "/coach", label: "Patients", icon: Users, id: "nav-coach" });
   if (role === "admin" || role === "super_admin") links.push({ to: "/admin", label: "Admin", icon: ShieldCheck, id: "nav-admin" });
   links.push({ to: "/settings", label: "Settings", icon: Settings, id: "nav-settings" });
 

@@ -4,7 +4,7 @@ import { useNavigate } from "react-router-dom";
 import { useAuth } from "@/context/AuthContext";
 import { Button } from "@/components/ui/button";
 import { toast } from "sonner";
-import { Activity, Camera, LineChart, ShieldCheck, Sparkles, Ruler, Clock, ArrowRight, Check, Stethoscope, X, Download, Lock, Trash2 } from "lucide-react";
+import { Activity, Camera, LineChart, ShieldCheck, Sparkles, Ruler, Clock, ArrowRight, Check, Stethoscope, X, Download, Lock, Trash2, BadgeCheck } from "lucide-react";
 
 // REMINDER: DO NOT HARDCODE THE URL, OR ADD ANY FALLBACKS OR REDIRECT URLS, THIS BREAKS THE AUTH
 const login = () => {
@@ -16,6 +16,7 @@ const features = [
   { icon: Ruler, title: "Objective Measurement", desc: "AI estimates density, coverage and hairline position on a consistent 0–100 scale." },
   { icon: LineChart, title: "Trends Over Time", desc: "Interactive charts turn each weekly scan into a clear, comparable milestone." },
   { icon: Sparkles, title: "Plain-Language Insights", desc: "A concise, non-diagnostic summary explains exactly what changed between photos." },
+  { icon: BadgeCheck, title: "Expert-Reviewed", desc: "Opt in anytime to have a real hair coach personally check your report — a second set of eyes, not just an algorithm." },
 ];
 
 const privacyPoints = [
@@ -208,7 +209,7 @@ export default function Landing() {
       <section className="max-w-7xl mx-auto px-5 md:px-8 py-20">
         <h2 className="font-heading text-2xl sm:text-3xl lg:text-4xl font-semibold tracking-tight mb-3">Built for consistency</h2>
         <p className="text-muted-foreground max-w-2xl mb-12">Everything you need to measure change reliably — the enemy of accurate tracking is inconsistency, so we designed around it.</p>
-        <div className="grid md:grid-cols-3 gap-6">
+        <div className="grid md:grid-cols-2 lg:grid-cols-4 gap-6">
           {features.map((f, i) => (
             <motion.div key={f.title} initial={{ opacity: 0, y: 20 }} whileInView={{ opacity: 1, y: 0 }} viewport={{ once: true }} transition={{ delay: i * 0.05 }}
               className="rounded-2xl border border-border bg-card p-6 hover:-translate-y-1 transition-transform duration-200">

@@ -8,7 +8,7 @@ from fastapi import APIRouter, HTTPException, Query
 from utils import config
 from models.database import db
 from utils.deps import CurrentUser, require_roles
-from models.schemas import RoleIn, ScanLimitIn, SettingsIn
+from models.schemas import CoachAssignIn, RoleIn, ScanLimitIn, SettingsIn
 from services import quota as quota_service
 
 router = APIRouter(prefix="/admin", tags=["admin"])
@@ -76,8 +76,8 @@ async def admin_list_users(user: CurrentUser):
 @router.post("/users/{target_user_id}/role")
 async def admin_set_role(target_user_id: str, body: RoleIn, user: CurrentUser):
     require_roles(user, "super_admin")
-    if body.role not in ("user", "admin"):
-        raise HTTPException(status_code=400, detail="Role must be 'user' or 'admin'")
+    if body.role not in ("user", "admin", "coach"):
+        raise HTTPException(status_code=400, detail="Role must be 'user', 'admin' or 'coach'")
     target = await db.users.find_one({"user_id": target_user_id}, {"_id": 0})
     if not target:
         raise HTTPException(status_code=404, detail="User not found")
@@ -167,3 +167,60 @@ async def admin_update_settings(body: SettingsIn, user: CurrentUser):
     require_roles(user, "admin", "super_admin")
     patch = body.model_dump(exclude_unset=True)
     return await quota_service.update_settings(patch)
+
+
+@router.get("/coaches")
+async def admin_list_coaches(user: CurrentUser):
+    """Coach roster for the assignment dropdown -- accounts already promoted
+    to role="coach" via /admin/users/{id}/role (super_admin-only, same as
+    'admin')."""
+    require_roles(user, "admin", "super_admin")
+    return await db.users.find({"role": "coach"}, {"_id": 0, "user_id": 1, "name": 1, "email": 1}).to_list(500)
+
+
+@router.get("/coach-assignments")
+async def admin_coach_assignments(user: CurrentUser):
+    """Every plain user's current coach pairing plus whether they've actually
+    opted in to share reports -- the pairing alone doesn't grant the coach
+    anything (see routers/coach.py), so both columns matter to whoever's
+    reading this list."""
+    require_roles(user, "admin", "super_admin")
+    coaches = {
+        c["user_id"]: c.get("name", "")
+        for c in await db.users.find({"role": "coach"}, {"_id": 0, "user_id": 1, "name": 1}).to_list(500)
+    }
+    users = await db.users.find(
+        {"role": {"$nin": ["admin", "super_admin", "coach", "dermatologist"]}},
+        {"_id": 0, "user_id": 1, "name": 1, "email": 1, "coach_id": 1, "share_with_coach": 1},
+    ).to_list(2000)
+    return [
+        {
+            "user_id": u["user_id"],
+            "name": u.get("name"),
+            "email": u.get("email"),
+            "coach_id": u.get("coach_id"),
+            "coach_name": coaches.get(u.get("coach_id")) if u.get("coach_id") else None,
+            "share_with_coach": bool(u.get("share_with_coach")),
+        }
+        for u in users
+    ]
+
+
+@router.post("/users/{target_user_id}/coach")
+async def admin_assign_coach(target_user_id: str, body: CoachAssignIn, user: CurrentUser):
+    """Pairing is admin-managed and 1:1. Setting or changing it always resets
+    share_with_coach back to False so a user's reports don't silently stay
+    visible to whoever the *new* coach is without them re-consenting (mirrors
+    how admin_set_scan_limit stamps a fresh credits_reset_at on every call)."""
+    require_roles(user, "admin", "super_admin")
+    target = await db.users.find_one({"user_id": target_user_id}, {"_id": 0})
+    if not target:
+        raise HTTPException(status_code=404, detail="User not found")
+    if body.coach_id is not None:
+        coach = await db.users.find_one({"user_id": body.coach_id, "role": "coach"}, {"_id": 0})
+        if not coach:
+            raise HTTPException(status_code=404, detail="Coach not found")
+    await db.users.update_one(
+        {"user_id": target_user_id}, {"$set": {"coach_id": body.coach_id, "share_with_coach": False}}
+    )
+    return {"user_id": target_user_id, "coach_id": body.coach_id, "share_with_coach": False}

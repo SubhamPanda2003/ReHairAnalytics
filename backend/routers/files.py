@@ -29,13 +29,21 @@ async def download_file(
         # Not the photo's owner -- still allow it if the requester is a
         # dermatologist the owner has an active, confirmed appointment with
         # AND has opted in to share their history for (see appointments.py's
-        # /share, /unshare, /history). Anyone else still 404s.
+        # /share, /unshare, /history), OR the requester is the owner's
+        # admin-assigned hair coach AND the owner has opted in to share with
+        # them (see coach.py's /share, gated live on share_with_coach same
+        # as the dermatologist case). Anyone else still 404s.
         shared = await db.appointments.find_one({
             "dermatologist_id": user["user_id"],
             "patient_id": record["user_id"],
             "status": "confirmed",
             "share_history": True,
         }, {"_id": 0})
+        if not shared:
+            owner = await db.users.find_one(
+                {"user_id": record["user_id"]}, {"_id": 0, "coach_id": 1, "share_with_coach": 1}
+            )
+            shared = bool(owner and owner.get("coach_id") == user["user_id"] and owner.get("share_with_coach"))
         if not shared:
             raise HTTPException(status_code=404, detail="File not found")
     if not record:

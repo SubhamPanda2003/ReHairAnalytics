@@ -10,19 +10,54 @@ import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import {
   AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription,
   AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 import { toast } from "sonner";
-import { ShieldCheck, Check, X, Loader2, Stethoscope, UserCog, Crown, Zap, Minus, Plus, Trash2 } from "lucide-react";
+import { ShieldCheck, Check, X, Loader2, Stethoscope, UserCog, Crown, Zap, Minus, Plus, Trash2, Users } from "lucide-react";
 
 const ROLE_LABELS = {
   super_admin: ["Super admin", "bg-primary/15 text-primary"],
   admin: ["Admin", "bg-accent text-accent-foreground"],
   dermatologist: ["Dermatologist", "bg-amber-500/15 text-amber-600"],
+  coach: ["Coach", "bg-sky-500/15 text-sky-600"],
   user: ["User", "bg-muted text-muted-foreground"],
 };
+
+/** One row in the "Coaches" tab: a plain user, whether they've opted in to
+ * share their reports (read-only -- only the user themselves can flip that,
+ * see Settings.jsx), and a dropdown to pair/unpair them with a coach. */
+function CoachAssignRow({ row, coaches, onAssign }) {
+  const [saving, setSaving] = useState(false);
+  const assign = async (val) => {
+    setSaving(true);
+    try { await onAssign(row.user_id, val === "none" ? null : val); } finally { setSaving(false); }
+  };
+  return (
+    <div className="rounded-2xl border border-border bg-card p-4 flex flex-wrap items-center justify-between gap-3" data-testid={`coach-assign-${row.user_id}`}>
+      <div>
+        <p className="font-medium">{row.name || row.email}</p>
+        <p className="text-xs text-muted-foreground">{row.email}</p>
+      </div>
+      <div className="flex items-center gap-2">
+        {row.coach_id && (
+          <Badge variant={row.share_with_coach ? "secondary" : "outline"} className="rounded-full">
+            {row.share_with_coach ? "Sharing" : "Not shared yet"}
+          </Badge>
+        )}
+        <Select value={row.coach_id || "none"} onValueChange={assign} disabled={saving}>
+          <SelectTrigger className="w-48 rounded-full" data-testid={`coach-select-${row.user_id}`}><SelectValue placeholder="No coach" /></SelectTrigger>
+          <SelectContent>
+            <SelectItem value="none">No coach</SelectItem>
+            {coaches.map((c) => <SelectItem key={c.user_id} value={c.user_id}>{c.name || c.email}</SelectItem>)}
+          </SelectContent>
+        </Select>
+      </div>
+    </div>
+  );
+}
 
 /** One editable row in the "Scan credits" tab: report count (read-only) plus
  * a stepper + direct input for the per-user limit override. Blank = no
@@ -95,6 +130,8 @@ export default function Admin() {
   const { data: users } = useQuery({ queryKey: ["admin-users"], queryFn: async () => (await api.get("/admin/users")).data, enabled: isSuper });
   const { data: scanUsage } = useQuery({ queryKey: ["admin-scan-usage"], queryFn: async () => (await api.get("/admin/scan-usage")).data, enabled: isAdmin });
   const { data: settings } = useQuery({ queryKey: ["admin-settings"], queryFn: async () => (await api.get("/admin/settings")).data, enabled: isAdmin });
+  const { data: coaches } = useQuery({ queryKey: ["admin-coaches"], queryFn: async () => (await api.get("/admin/coaches")).data, enabled: isAdmin });
+  const { data: coachAssignments } = useQuery({ queryKey: ["admin-coach-assignments"], queryFn: async () => (await api.get("/admin/coach-assignments")).data, enabled: isAdmin });
 
   if (!isAdmin) {
     return (
@@ -136,6 +173,13 @@ export default function Admin() {
       qc.invalidateQueries({ queryKey: ["admin-scan-usage"] });
     } catch (e) { toast.error(e.response?.data?.detail || "Could not update scan limit"); }
   };
+  const assignCoach = async (uid, coach_id) => {
+    try {
+      await api.post(`/admin/users/${uid}/coach`, { coach_id });
+      toast.success(coach_id ? "Coach assigned" : "Coach removed");
+      qc.invalidateQueries({ queryKey: ["admin-coach-assignments"] });
+    } catch (e) { toast.error(e.response?.data?.detail || "Could not assign coach"); }
+  };
   const saveSettings = async (e) => {
     e.preventDefault();
     const fd = new FormData(e.target);
@@ -168,6 +212,7 @@ export default function Admin() {
           <TabsList className="rounded-full h-auto p-1">
             <TabsTrigger value="derms" className="rounded-full" data-testid="tab-derms"><Stethoscope className="w-4 h-4 mr-1.5" /> Dermatologists</TabsTrigger>
             <TabsTrigger value="credits" className="rounded-full" data-testid="tab-credits"><Zap className="w-4 h-4 mr-1.5" /> Scan credits</TabsTrigger>
+            <TabsTrigger value="coaches" className="rounded-full" data-testid="tab-coaches"><Users className="w-4 h-4 mr-1.5" /> Coaches</TabsTrigger>
             {isSuper && <TabsTrigger value="users" className="rounded-full" data-testid="tab-users"><UserCog className="w-4 h-4 mr-1.5" /> Users</TabsTrigger>}
           </TabsList>
 
@@ -246,6 +291,17 @@ export default function Admin() {
             )}
           </TabsContent>
 
+          <TabsContent value="coaches" className="mt-6">
+            {(coaches?.length ?? 0) === 0 && (
+              <p className="text-muted-foreground text-sm mb-6">No coaches yet — a super admin can promote a user to "Coach" from the Users tab.</p>
+            )}
+            {!coachAssignments ? <div className="flex justify-center py-12"><Loader2 className="w-6 h-6 animate-spin text-primary" /></div> : (
+              <div className="space-y-3">
+                {coachAssignments.map((row) => <CoachAssignRow key={row.user_id} row={row} coaches={coaches || []} onAssign={assignCoach} />)}
+              </div>
+            )}
+          </TabsContent>
+
           {isSuper && (
             <TabsContent value="users" className="mt-6">
               <div className="space-y-3">
@@ -257,9 +313,18 @@ export default function Admin() {
                     </div>
                     <div className="flex items-center gap-2">
                       <StatusPill value={u.role} labels={ROLE_LABELS} />
-                      {u.role !== "super_admin" && (u.role === "admin"
-                        ? <Button size="sm" variant="outline" className="rounded-full" onClick={() => setRole(u.user_id, "user")} data-testid={`demote-${u.user_id}`}>Remove admin</Button>
-                        : <Button size="sm" className="rounded-full" onClick={() => setRole(u.user_id, "admin")} data-testid={`promote-${u.user_id}`}>Make admin</Button>)}
+                      {u.role !== "super_admin" && (
+                        u.role === "admin" ? (
+                          <Button size="sm" variant="outline" className="rounded-full" onClick={() => setRole(u.user_id, "user")} data-testid={`demote-${u.user_id}`}>Remove admin</Button>
+                        ) : u.role === "coach" ? (
+                          <Button size="sm" variant="outline" className="rounded-full" onClick={() => setRole(u.user_id, "user")} data-testid={`demote-coach-${u.user_id}`}>Remove coach</Button>
+                        ) : (
+                          <div className="flex items-center gap-2">
+                            <Button size="sm" className="rounded-full" onClick={() => setRole(u.user_id, "admin")} data-testid={`promote-${u.user_id}`}>Make admin</Button>
+                            <Button size="sm" variant="outline" className="rounded-full" onClick={() => setRole(u.user_id, "coach")} data-testid={`promote-coach-${u.user_id}`}>Make coach</Button>
+                          </div>
+                        )
+                      )}
                     </div>
                   </div>
                 ))}
