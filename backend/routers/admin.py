@@ -1,5 +1,6 @@
 """Admin/super-admin moderation: dermatologist approval, user roles, and
 scan-credit management."""
+from datetime import datetime, timezone
 from typing import Optional
 
 from fastapi import APIRouter, HTTPException, Query
@@ -95,24 +96,21 @@ async def admin_scan_usage(user: CurrentUser):
     default). Open to admin + super_admin, unlike /users which stays
     super_admin-only since it also exposes role management."""
     require_roles(user, "admin", "super_admin")
-    users = await db.users.find({}, {"_id": 0, "user_id": 1, "email": 1, "name": 1, "role": 1, "scan_limit": 1}).to_list(2000)
-    agg = {
-        row["_id"]: row
-        for row in await db.tracking_sessions.aggregate([
-            {"$group": {
-                "_id": "$user_id",
-                "count": {"$sum": 1},
-                "credits": {"$sum": {"$ifNull": ["$credits_used", quota_service.SCAN_CREDIT_COST]}},
-            }},
-        ]).to_list(2000)
+    users = await db.users.find(
+        {}, {"_id": 0, "user_id": 1, "email": 1, "name": 1, "role": 1, "scan_limit": 1, "credits_reset_at": 1}
+    ).to_list(2000)
+    counts = {
+        row["_id"]: row["count"]
+        for row in await db.tracking_sessions.aggregate([{"$group": {"_id": "$user_id", "count": {"$sum": 1}}}]).to_list(2000)
     }
-    settings = await quota_service.get_settings()
     rows = []
     for u in users:
         u.setdefault("role", "user")
-        agg_row = agg.get(u["user_id"], {})
-        scan_count = agg_row.get("count", 0)
-        credits = agg_row.get("credits", 0)
+        scan_count = counts.get(u["user_id"], 0)
+        # Per-user, not batched -- each user may have their own
+        # credits_reset_at cutoff (see admin_set_scan_limit), so a single
+        # blanket aggregation across everyone can't compute this correctly.
+        credits = await quota_service.credits_used(u["user_id"], since=u.get("credits_reset_at"))
         effective = await quota_service.effective_limit(u)
         remaining = None if effective is None else max(0, effective - credits)
         rows.append({
@@ -131,16 +129,31 @@ async def admin_scan_usage(user: CurrentUser):
 
 @router.post("/users/{target_user_id}/scan-limit")
 async def admin_set_scan_limit(target_user_id: str, body: ScanLimitIn, user: CurrentUser):
+    """Setting (or clearing) a user's limit is treated as a fresh credit
+    grant -- credits_reset_at is stamped on every call, so usage accrued
+    before this point stops counting against the new limit (see
+    services.quota.credits_used). Scan history itself isn't touched, only
+    what counts toward the current allocation, so "reports generated"
+    elsewhere in the admin view stays a true lifetime count."""
     require_roles(user, "admin", "super_admin")
     if body.scan_limit is not None and body.scan_limit < 0:
         raise HTTPException(status_code=400, detail="scan_limit must be 0 or greater")
     target = await db.users.find_one({"user_id": target_user_id}, {"_id": 0})
     if not target:
         raise HTTPException(status_code=404, detail="User not found")
-    await db.users.update_one({"user_id": target_user_id}, {"$set": {"scan_limit": body.scan_limit}})
+    reset_at = datetime.now(timezone.utc).isoformat()
+    await db.users.update_one(
+        {"user_id": target_user_id}, {"$set": {"scan_limit": body.scan_limit, "credits_reset_at": reset_at}}
+    )
     target["scan_limit"] = body.scan_limit
+    target["credits_reset_at"] = reset_at
     effective = await quota_service.effective_limit(target)
-    return {"user_id": target_user_id, "scan_limit": body.scan_limit, "effective_limit": effective}
+    used = await quota_service.credits_used(target_user_id, since=reset_at)
+    remaining = None if effective is None else max(0, effective - used)
+    return {
+        "user_id": target_user_id, "scan_limit": body.scan_limit, "effective_limit": effective,
+        "used": used, "remaining": remaining,
+    }
 
 
 @router.get("/settings")

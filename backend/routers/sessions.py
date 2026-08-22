@@ -121,7 +121,8 @@ async def auto_scan(
 
     cost = quota_service.PRECISION_SCAN_CREDIT_COST if precision else quota_service.SCAN_CREDIT_COST
     limit = await quota_service.effective_limit(user)
-    if limit is not None and (await quota_service.credits_used(user["user_id"])) + cost > limit:
+    used_so_far = await quota_service.credits_used(user["user_id"], since=user.get("credits_reset_at"))
+    if limit is not None and used_so_far + cost > limit:
         settings = await quota_service.get_settings()
         raise HTTPException(status_code=403, detail={
             "code": "scan_limit_reached",

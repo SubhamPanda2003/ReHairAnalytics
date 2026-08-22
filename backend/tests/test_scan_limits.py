@@ -56,14 +56,17 @@ def _seed(db, label, email=None, role=None):
 
 
 def _seed_scans(db, user_id, count):
+    # uuid suffix (not just index) -- callers may seed the same user_id more
+    # than once (e.g. before and after a credit reset), and ids need to stay
+    # unique across those calls, not just within a single one.
     db.tracking_sessions.insert_many([
         {
-            "id": f"TEST_session_{user_id}_{i}",
+            "id": f"TEST_session_{user_id}_{uuid.uuid4().hex[:8]}",
             "user_id": user_id,
             "date": datetime.now(timezone.utc).isoformat(),
             "created_at": datetime.now(timezone.utc).isoformat(),
         }
-        for i in range(count)
+        for _ in range(count)
     ])
 
 
@@ -175,8 +178,11 @@ class TestScanLimitManagement:
 class TestScanEnforcement:
     def test_blocked_once_used_reaches_limit(self, actors, db):
         uid = actors["user_b"][0]
-        _seed_scans(db, uid, 2)
+        # Set the limit BEFORE seeding usage -- setting it stamps
+        # credits_reset_at (see admin_set_scan_limit), and only usage from
+        # after that point counts (see TestCreditResetOnLimitChange).
         assert actors["admin"][2].post(f"{API}/admin/users/{uid}/scan-limit", json={"scan_limit": 2}).status_code == 200
+        _seed_scans(db, uid, 2)
 
         q = actors["user_b"][2].get(f"{API}/scan/quota").json()
         assert q["used"] == 2 and q["remaining"] == 0
@@ -255,11 +261,19 @@ class TestPrecisionCreditCost:
         assert row["scan_count"] == 2, row
         assert row["credits_used"] == 4, row
 
-    def test_05_precision_blocked_when_only_enough_for_normal(self, own_user, actors):
+    def test_05_precision_blocked_when_only_enough_for_normal(self, own_user, actors, db):
         uid, c = own_user
-        # 4 credits used so far; cap the limit at 5 -- 1 remains, enough for
-        # a normal scan but not a precision one.
+        # Fresh grant of 5 (setting the limit resets prior usage from tests
+        # 01/02 -- see TestCreditResetOnLimitChange), then use 4 of it
+        # directly so exactly 1 remains: enough for a normal scan (cost 1)
+        # but not a precision one (cost 3).
         assert actors["admin"][2].post(f"{API}/admin/users/{uid}/scan-limit", json={"scan_limit": 5}).status_code == 200
+        db.tracking_sessions.insert_one({
+            "id": f"TEST_precost5_{uid}", "user_id": uid,
+            "date": datetime.now(timezone.utc).isoformat(),
+            "created_at": datetime.now(timezone.utc).isoformat(),
+            "credits_used": 4,
+        })
         assert c.get(f"{API}/scan/quota").json()["remaining"] == 1
 
         with open(FIXTURE_IMG, "rb") as f:
@@ -288,3 +302,53 @@ class TestPrecisionCreditCost:
         })
         after = c.get(f"{API}/scan/quota").json()["used"]
         assert after == before + 1, (before, after)
+
+
+# --------------------------------------------------- credit reset on re-grant
+class TestCreditResetOnLimitChange:
+    """Setting (or clearing) a user's limit stamps credits_reset_at (see
+    admin_set_scan_limit) -- a fresh grant, not a top-up stacked on old
+    usage. Scan history itself is never touched, only what counts toward
+    the CURRENT limit, so lifetime scan_count stays accurate throughout."""
+
+    @pytest.fixture(scope="class")
+    def own_user(self, db):
+        uid, _, c = _seed(db, "creditreset")
+        yield uid, c
+        db.users.delete_many({"user_id": uid})
+        db.user_sessions.delete_many({"user_id": uid})
+        db.tracking_sessions.delete_many({"user_id": uid})
+
+    def test_01_exhaust_then_raise_limit_resets_usage(self, own_user, actors, db):
+        uid, c = own_user
+        # Grant 4 (stamps credits_reset_at), then use exactly 4 -- exhausted.
+        assert actors["admin"][2].post(f"{API}/admin/users/{uid}/scan-limit", json={"scan_limit": 4}).status_code == 200
+        _seed_scans(db, uid, 4)
+        q = c.get(f"{API}/scan/quota").json()
+        assert q["used"] == 4 and q["remaining"] == 0, q
+
+        # Admin raises the limit to 10 -- a new grant, so the 4 already-used
+        # credits (all from before this new reset point) stop counting.
+        r = actors["admin"][2].post(f"{API}/admin/users/{uid}/scan-limit", json={"scan_limit": 10})
+        assert r.status_code == 200, r.text
+        assert r.json()["used"] == 0 and r.json()["remaining"] == 10, r.json()
+
+        q2 = c.get(f"{API}/scan/quota").json()
+        assert q2["used"] == 0 and q2["remaining"] == 10, q2
+        assert q2["scan_count"] == 4, q2  # lifetime report count is unaffected by the reset
+
+    def test_02_admin_view_reflects_reset(self, own_user, actors):
+        uid, _ = own_user
+        rows = actors["admin"][2].get(f"{API}/admin/scan-usage").json()
+        row = next(x for x in rows if x["user_id"] == uid)
+        assert row["credits_used"] == 0, row
+        assert row["remaining"] == 10, row
+        assert row["scan_count"] == 4, row
+
+    def test_03_new_scans_after_reset_count_from_zero(self, own_user, db):
+        uid, c = own_user
+        _seed_scans(db, uid, 3)
+        q = c.get(f"{API}/scan/quota").json()
+        assert q["used"] == 3, q
+        assert q["remaining"] == 7, q
+        assert q["scan_count"] == 7, q  # 4 pre-reset + 3 post-reset, lifetime total

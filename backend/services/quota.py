@@ -45,16 +45,27 @@ async def scan_count(user_id: str) -> int:
     return await db.tracking_sessions.count_documents({"user_id": user_id})
 
 
-async def credits_used(user_id: str) -> int:
-    """Total credits actually charged so far. Summed from each session's own
-    stored credits_used (set once, at scan time -- see
-    services.sessions.create_tracking_session), not recomputed from the
-    current cost constants, so a later change to pricing never retroactively
-    reprices old scans. Sessions from before this field existed default to
-    SCAN_CREDIT_COST -- the conservative reading, since there's no way to
-    know in hindsight which of them were precision runs."""
+async def credits_used(user_id: str, since: Optional[str] = None) -> int:
+    """Credits charged since `since` (an ISO timestamp), or all-time if not
+    given. Summed from each session's own stored credits_used (set once, at
+    scan time -- see services.sessions.create_tracking_session), not
+    recomputed from the current cost constants, so a later change to
+    pricing never retroactively reprices old scans. Sessions from before
+    this field existed default to SCAN_CREDIT_COST -- the conservative
+    reading, since there's no way to know in hindsight which of them were
+    precision runs.
+
+    `since` is a user's credits_reset_at (see admin_set_scan_limit): every
+    time an admin explicitly sets or clears this user's limit, that's
+    treated as a fresh grant -- usage before that point no longer counts
+    against it, the same way a prepaid top-up doesn't inherit last period's
+    balance. Scan history itself is never touched or deleted, only which of
+    it counts toward the current limit."""
+    match = {"user_id": user_id}
+    if since:
+        match["date"] = {"$gte": since}
     rows = await db.tracking_sessions.aggregate([
-        {"$match": {"user_id": user_id}},
+        {"$match": match},
         {"$group": {"_id": None, "total": {"$sum": {"$ifNull": ["$credits_used", SCAN_CREDIT_COST]}}}},
     ]).to_list(1)
     return rows[0]["total"] if rows else 0
@@ -73,7 +84,7 @@ async def effective_limit(user: dict) -> Optional[int]:
 async def quota_for(user: dict) -> dict:
     settings = await get_settings()
     limit = await effective_limit(user)
-    used = await credits_used(user["user_id"])
+    used = await credits_used(user["user_id"], since=user.get("credits_reset_at"))
     scans = await scan_count(user["user_id"])
     remaining = None if limit is None else max(0, limit - used)
     return {
