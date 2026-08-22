@@ -253,7 +253,7 @@ export default function Admin() {
                   <div key={u.user_id} className="rounded-2xl border border-border bg-card p-4 flex flex-wrap items-center justify-between gap-3" data-testid={`user-${u.user_id}`}>
                     <div className="flex items-center gap-3">
                       {u.picture ? <img src={u.picture} alt="" className="w-9 h-9 rounded-full object-cover" referrerPolicy="no-referrer" /> : <div className="w-9 h-9 rounded-full bg-accent flex items-center justify-center text-xs font-semibold">{u.name?.[0] || "U"}</div>}
-                      <div><p className="font-medium">{u.name || u.email}</p><p className="text-xs text-muted-foreground">{u.email}</p></div>
+                      <div><p className="font-medium">{u.name || u.email}</p><p className="text-xs text-muted-foreground">{u.email}{u.phone && ` · ${u.phone}`}</p></div>
                     </div>
                     <div className="flex items-center gap-2">
                       <StatusPill value={u.role} labels={ROLE_LABELS} />

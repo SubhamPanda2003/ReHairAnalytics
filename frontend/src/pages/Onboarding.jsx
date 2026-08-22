@@ -14,7 +14,7 @@ import { Activity, ArrowRight } from "lucide-react";
 export default function Onboarding() {
   const navigate = useNavigate();
   const { checkAuth } = useAuth();
-  const [form, setForm] = useState({ age: "", gender: "", hair_type: "", goals: "" });
+  const [form, setForm] = useState({ age: "", gender: "", hair_type: "", goals: "", phone: "" });
   const [saving, setSaving] = useState(false);
 
   const save = async () => {
@@ -25,6 +25,7 @@ export default function Onboarding() {
         gender: form.gender || null,
         hair_type: form.hair_type || null,
         goals: form.goals || null,
+        phone: form.phone || null,
       });
       await checkAuth();
       toast.success("Profile created");
@@ -65,6 +66,11 @@ export default function Onboarding() {
                 </SelectContent>
               </Select>
             </div>
+          </div>
+          <div>
+            <Label className="text-xs uppercase tracking-wider text-muted-foreground">Mobile / WhatsApp number</Label>
+            <Input type="tel" value={form.phone} onChange={(e) => setForm({ ...form, phone: e.target.value })}
+              placeholder="+91 98765 43210" className="mt-1.5 rounded-xl" data-testid="onboarding-phone" />
           </div>
           <div>
             <Label className="text-xs uppercase tracking-wider text-muted-foreground">Hair type</Label>

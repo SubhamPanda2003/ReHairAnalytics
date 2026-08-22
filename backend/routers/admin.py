@@ -67,7 +67,7 @@ async def admin_delete_derm(derm_user_id: str, user: CurrentUser):
 @router.get("/users")
 async def admin_list_users(user: CurrentUser):
     require_roles(user, "super_admin")
-    users = await db.users.find({}, {"_id": 0, "user_id": 1, "email": 1, "name": 1, "picture": 1, "role": 1}).to_list(2000)
+    users = await db.users.find({}, {"_id": 0, "user_id": 1, "email": 1, "name": 1, "picture": 1, "role": 1, "phone": 1}).to_list(2000)
     for u in users:
         u.setdefault("role", "user")
     return users

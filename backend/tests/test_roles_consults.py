@@ -266,6 +266,27 @@ class TestAdminUsers:
         assert all("_id" not in u for u in users)
         assert all("role" in u for u in users)
 
+    def test_phone_captured_at_onboarding_shows_up_for_admin(self, actors, db):
+        uid, _, c = actors["user"]
+        r = c.post(f"{API}/profile", json={"phone": "+91 98765 43210"})
+        assert r.status_code == 200, r.text
+        assert r.json()["phone"] == "+91 98765 43210"
+
+        # /auth/me reflects it directly on the account (not just the profile doc)
+        me = c.get(f"{API}/auth/me").json()
+        assert me["phone"] == "+91 98765 43210", me
+
+        # and it shows up in the admin user list, alongside email, with no join
+        users = actors["sa"][2].get(f"{API}/admin/users").json()
+        row = next(u for u in users if u["user_id"] == uid)
+        assert row["phone"] == "+91 98765 43210", row
+        assert row["email"] == me["email"]
+
+        # not duplicated into the hair-tracking profile doc -- users.phone
+        # is the single source of truth
+        profile_doc = db.profiles.find_one({"user_id": uid}, {"_id": 0})
+        assert profile_doc is None or "phone" not in profile_doc, profile_doc
+
     def test_promote_and_demote(self, actors):
         target = actors["user"][0]
         r = actors["sa"][2].post(f"{API}/admin/users/{target}/role", json={"role": "admin"})
