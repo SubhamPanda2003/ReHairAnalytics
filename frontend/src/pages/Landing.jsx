@@ -239,29 +239,6 @@ export default function Landing() {
         </div>
       </section>
 
-      {/* Pricing */}
-      <section className="max-w-7xl mx-auto px-5 md:px-8 py-20">
-        <h2 className="font-heading text-2xl sm:text-3xl lg:text-4xl font-semibold tracking-tight mb-3">Simple pricing</h2>
-        <p className="text-muted-foreground mb-12">Start free. Placeholder plans below — no charges during the MVP.</p>
-        <div className="grid md:grid-cols-3 gap-6">
-          {[
-            { name: "Starter", price: "₹0", tag: "Forever free", feats: ["Weekly tracking", "Baseline + 4 comparisons", "AI summaries"], primary: false },
-            { name: "Pro", price: "₹299", tag: "Placeholder", feats: ["Unlimited scans", "All 5 views", "Full trend charts", "Data export"], primary: true },
-            { name: "Clinic", price: "Custom", tag: "Coming soon", feats: ["Multi-patient", "Team dashboard", "Priority AI"], primary: false },
-          ].map((p) => (
-            <div key={p.name} className={`rounded-2xl p-7 border ${p.primary ? "border-primary bg-primary text-primary-foreground" : "border-border bg-card"}`}>
-              <p className={`text-xs uppercase tracking-[0.2em] font-semibold ${p.primary ? "text-primary-foreground/70" : "text-muted-foreground"}`}>{p.tag}</p>
-              <h3 className="font-heading text-2xl font-bold mt-2">{p.name}</h3>
-              <p className="font-heading text-4xl font-bold mt-3">{p.price}<span className={`text-sm font-medium ${p.primary ? "text-primary-foreground/70" : "text-muted-foreground"}`}>/mo</span></p>
-              <ul className="mt-6 space-y-2.5">
-                {p.feats.map((f) => <li key={f} className="flex items-center gap-2 text-sm"><Check className="w-4 h-4" /> {f}</li>)}
-              </ul>
-              <Button onClick={login} variant={p.primary ? "secondary" : "outline"} className="w-full mt-7 rounded-full" data-testid={`pricing-${p.name.toLowerCase()}-btn`}>Get started</Button>
-            </div>
-          ))}
-        </div>
-      </section>
-
       <footer className="border-t border-border">
         <div className="max-w-7xl mx-auto px-5 md:px-8 py-10 flex flex-col md:flex-row items-center justify-between gap-4">
           <div className="flex items-center gap-2.5">
