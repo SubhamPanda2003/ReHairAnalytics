@@ -6,13 +6,14 @@ import { api, fileUrl } from "@/lib/api";
 import { fmtScore } from "@/lib/scores";
 import Navbar from "@/components/Navbar";
 import { Button } from "@/components/ui/button";
+import { Switch } from "@/components/ui/switch";
 import {
   AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription,
   AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 import { toast } from "sonner";
 import { LineChart, Line, ResponsiveContainer, XAxis, YAxis, Tooltip, CartesianGrid, Legend } from "recharts";
-import { Camera, ChevronRight, Loader2, ImageOff, Trash2 } from "lucide-react";
+import { Camera, ChevronRight, Loader2, ImageOff, Trash2, UserRound } from "lucide-react";
 import TrendBadge from "@/components/TrendBadge";
 
 const fetchTimeline = async () => (await api.get("/timeline")).data;
@@ -23,8 +24,17 @@ export default function Timeline() {
   const qc = useQueryClient();
   const { data: timeline, isLoading } = useQuery({ queryKey: ["timeline"], queryFn: fetchTimeline });
   const { data: progress } = useQuery({ queryKey: ["progress"], queryFn: fetchProgress });
+  const { data: coachInfo } = useQuery({ queryKey: ["my-coach"], queryFn: async () => (await api.get("/coach/mine")).data });
   const points = progress?.points || [];
   const [toDelete, setToDelete] = useState(null);
+
+  const toggleCoachShare = async (share) => {
+    try {
+      await api.post("/coach/share", { share });
+      qc.invalidateQueries({ queryKey: ["my-coach"] });
+      toast.success(share ? "Now sharing your timeline with your coach" : "Sharing turned off");
+    } catch (e) { toast.error("Could not update sharing"); }
+  };
 
   const deleteSession = useMutation({
     mutationFn: (id) => api.delete(`/sessions/${id}`),
@@ -55,6 +65,16 @@ export default function Timeline() {
           </div>
           <Button onClick={() => navigate("/upload")} className="rounded-full h-11 px-6" data-testid="timeline-upload-btn"><Camera className="w-4 h-4 mr-1.5" /> New scan</Button>
         </div>
+
+        {coachInfo?.coach && (
+          <div className="flex items-center justify-between gap-3 rounded-2xl border border-border bg-card px-4 py-3 mb-6" data-testid="timeline-coach-share">
+            <div className="flex items-center gap-2 text-sm min-w-0">
+              <UserRound className="w-4 h-4 text-muted-foreground shrink-0" />
+              <span className="truncate">Share this timeline with <b>{coachInfo.coach.name || "your coach"}</b></span>
+            </div>
+            <Switch checked={!!coachInfo.share_with_coach} onCheckedChange={toggleCoachShare} data-testid="timeline-coach-share-switch" />
+          </div>
+        )}
 
         {isLoading ? (
           <div className="flex justify-center py-20"><Loader2 className="w-7 h-7 animate-spin text-primary" /></div>
