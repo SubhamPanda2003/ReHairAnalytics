@@ -209,6 +209,15 @@ export default function Report() {
                               ))}
                             </div>
                           )}
+                          {(s.coach_notes || []).length > 0 && (
+                            <div className="mt-3 pt-3 border-t border-border space-y-1.5">
+                              {s.coach_notes.map((n) => (
+                                <div key={n.id} className="rounded-lg bg-secondary/40 px-3 py-1.5 text-xs" data-testid={`report-coach-note-${n.id}`}>
+                                  <span className="font-medium">{n.coach_name || "Coach"}:</span> {n.text}
+                                </div>
+                              ))}
+                            </div>
+                          )}
                         </div>
                       );
                     })}

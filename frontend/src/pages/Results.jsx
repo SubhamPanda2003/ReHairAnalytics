@@ -16,7 +16,7 @@ import {
   AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 import { toast } from "sonner";
-import { ArrowLeft, Sparkles, TrendingUp, TrendingDown, Minus, Loader2, FileText, Target, Trash2 } from "lucide-react";
+import { ArrowLeft, Sparkles, TrendingUp, TrendingDown, Minus, Loader2, FileText, Target, Trash2, MessageCircle } from "lucide-react";
 
 const fetchSession = async (id) => (await api.get(`/sessions/${id}`)).data;
 
@@ -215,6 +215,22 @@ export default function Results() {
               <div className="flex items-center gap-2 mb-3"><Sparkles className="w-5 h-5 text-primary" /><h3 className="font-heading font-semibold text-lg">AI insight</h3></div>
               <p className="text-base leading-relaxed text-foreground/90">{a.ai_summary}</p>
             </motion.div>
+
+            {/* Hair coach comments on this scan */}
+            {s.coach_notes?.length > 0 && (
+              <motion.div initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.12 }}
+                className="rounded-3xl border border-sky-500/30 bg-card p-6 md:p-8 mb-6" data-testid="coach-feedback">
+                <div className="flex items-center gap-2 mb-3"><MessageCircle className="w-5 h-5 text-sky-600" /><h3 className="font-heading font-semibold text-lg">Coach feedback</h3></div>
+                <div className="space-y-3">
+                  {s.coach_notes.map((n) => (
+                    <div key={n.id} className="rounded-xl bg-secondary/40 px-4 py-3" data-testid={`coach-note-${n.id}`}>
+                      <p className="text-sm leading-relaxed">{n.text}</p>
+                      <p className="text-xs text-muted-foreground mt-1.5">{n.coach_name || "Coach"} · {new Date(n.created_at).toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" })}</p>
+                    </div>
+                  ))}
+                </div>
+              </motion.div>
+            )}
 
             {/* Side-by-side comparison */}
             {s.baseline_best_image && s.current_best_image && (

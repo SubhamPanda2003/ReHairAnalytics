@@ -264,6 +264,14 @@ class TestCoachNotes:
         s = next(s for s in r.json() if s["id"] == session_id)
         assert len(s["coach_notes"]) == 1
 
+    def test_04_note_visible_on_single_session_endpoint(self, paired):
+        """Results.jsx/Report.jsx read a single scan via GET /sessions/{id}
+        (not /timeline) -- confirms that surface got wired up too."""
+        user_client, session_id = paired["user"][2], paired["session_id"]
+        r = user_client.get(f"{API}/sessions/{session_id}")
+        assert r.status_code == 200, r.text
+        assert len(r.json()["coach_notes"]) == 1
+
     def test_empty_text_400(self, paired):
         coach_client, user_uid, session_id = paired["coach"][2], paired["user"][0], paired["session_id"]
         r = coach_client.post(f"{API}/coach/patients/{user_uid}/sessions/{session_id}/notes", json={"text": "   "})
