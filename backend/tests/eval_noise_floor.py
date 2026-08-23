@@ -18,7 +18,6 @@ measures noise, not accuracy against a ground truth.
 """
 import argparse
 import asyncio
-import base64
 import io
 import json
 import os
@@ -33,6 +32,7 @@ load_dotenv(Path(__file__).resolve().parent.parent / ".env")
 from PIL import Image, ImageEnhance, ImageFilter  # noqa: E402
 
 from services import ai_service  # noqa: E402
+from utils import image_utils  # noqa: E402
 from utils.constants import LLM_FAILURE_SENTINEL  # noqa: E402
 
 # Small enough that a real user genuinely wouldn't notice reproducing them
@@ -57,9 +57,16 @@ def _shift(im: Image.Image, frac: float) -> Image.Image:
 
 
 def to_b64(img: Image.Image) -> str:
+    """Same preprocessing a real scan's photo actually goes through before
+    scoring (image_utils.to_base64_jpeg_for_scoring, i.e. CLAHE lighting
+    normalization) -- NOT a bare re-encode. An earlier version of this eval
+    used a local bare encode here, which meant it was measuring noise on
+    inputs the AI never actually sees in production (every real scan already
+    gets lighting-normalized, precision mode or not) -- overstating the
+    brightness-perturbation component of the measured spread specifically."""
     buf = io.BytesIO()
     img.convert("RGB").save(buf, format="JPEG", quality=90)
-    return base64.b64encode(buf.getvalue()).decode("ascii")
+    return image_utils.to_base64_jpeg_for_scoring(buf.getvalue())
 
 
 async def main():
