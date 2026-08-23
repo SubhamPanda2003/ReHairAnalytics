@@ -37,18 +37,18 @@ function CoachAssignRow({ row, coaches, onAssign }) {
   };
   return (
     <div className="rounded-2xl border border-border bg-card p-4 flex flex-wrap items-center justify-between gap-3" data-testid={`coach-assign-${row.user_id}`}>
-      <div>
-        <p className="font-medium">{row.name || row.email}</p>
-        <p className="text-xs text-muted-foreground">{row.email}</p>
+      <div className="min-w-0">
+        <p className="font-medium truncate">{row.name || row.email}</p>
+        <p className="text-xs text-muted-foreground truncate">{row.email}</p>
       </div>
-      <div className="flex items-center gap-2">
+      <div className="flex flex-wrap items-center gap-2 w-full sm:w-auto">
         {row.coach_id && (
           <Badge variant={row.share_with_coach ? "secondary" : "outline"} className="rounded-full">
             {row.share_with_coach ? "Sharing" : "Not shared yet"}
           </Badge>
         )}
         <Select value={row.coach_id || "none"} onValueChange={assign} disabled={saving}>
-          <SelectTrigger className="w-48 rounded-full" data-testid={`coach-select-${row.user_id}`}><SelectValue placeholder="No coach" /></SelectTrigger>
+          <SelectTrigger className="w-full sm:w-48 rounded-full" data-testid={`coach-select-${row.user_id}`}><SelectValue placeholder="No coach" /></SelectTrigger>
           <SelectContent>
             <SelectItem value="none">No coach</SelectItem>
             {coaches.map((c) => <SelectItem key={c.user_id} value={c.user_id}>{c.name || c.email}</SelectItem>)}
@@ -82,15 +82,15 @@ function ScanCreditRow({ row, onSave }) {
 
   return (
     <div className="rounded-2xl border border-border bg-card p-4 flex flex-wrap items-center justify-between gap-3" data-testid={`credit-${row.user_id}`}>
-      <div>
-        <p className="font-medium">{row.name || row.email}</p>
+      <div className="min-w-0">
+        <p className="font-medium truncate">{row.name || row.email}</p>
         <p className="text-xs text-muted-foreground">
           {row.email} · {row.scan_count} report{row.scan_count === 1 ? "" : "s"}
           {row.credits_used !== row.scan_count && ` (${row.credits_used} credits used)`}
           {row.effective_limit != null && ` of ${row.effective_limit}`}
         </p>
       </div>
-      <div className="flex items-center gap-3">
+      <div className="flex flex-wrap items-center gap-3 w-full sm:w-auto">
         {row.effective_limit == null ? (
           <Badge variant="secondary" className="rounded-full">Unlimited</Badge>
         ) : (
@@ -209,12 +209,14 @@ export default function Admin() {
         <p className="text-muted-foreground mb-8">Approve dermatologists, manage scan credits{isSuper ? ", and manage user roles" : ""}.</p>
 
         <Tabs defaultValue="derms">
-          <TabsList className="rounded-full h-auto p-1">
-            <TabsTrigger value="derms" className="rounded-full" data-testid="tab-derms"><Stethoscope className="w-4 h-4 mr-1.5" /> Dermatologists</TabsTrigger>
-            <TabsTrigger value="credits" className="rounded-full" data-testid="tab-credits"><Zap className="w-4 h-4 mr-1.5" /> Scan credits</TabsTrigger>
-            <TabsTrigger value="coaches" className="rounded-full" data-testid="tab-coaches"><Users className="w-4 h-4 mr-1.5" /> Coaches</TabsTrigger>
-            {isSuper && <TabsTrigger value="users" className="rounded-full" data-testid="tab-users"><UserCog className="w-4 h-4 mr-1.5" /> Users</TabsTrigger>}
-          </TabsList>
+          <div className="overflow-x-auto -mx-5 px-5 md:mx-0 md:px-0 pb-1">
+            <TabsList className="rounded-full h-auto p-1 w-max">
+              <TabsTrigger value="derms" className="rounded-full whitespace-nowrap" data-testid="tab-derms"><Stethoscope className="w-4 h-4 mr-1.5" /> Dermatologists</TabsTrigger>
+              <TabsTrigger value="credits" className="rounded-full whitespace-nowrap" data-testid="tab-credits"><Zap className="w-4 h-4 mr-1.5" /> Scan credits</TabsTrigger>
+              <TabsTrigger value="coaches" className="rounded-full whitespace-nowrap" data-testid="tab-coaches"><Users className="w-4 h-4 mr-1.5" /> Coaches</TabsTrigger>
+              {isSuper && <TabsTrigger value="users" className="rounded-full whitespace-nowrap" data-testid="tab-users"><UserCog className="w-4 h-4 mr-1.5" /> Users</TabsTrigger>}
+            </TabsList>
+          </div>
 
           <TabsContent value="derms" className="mt-6">
             {isLoading ? <div className="flex justify-center py-12"><Loader2 className="w-6 h-6 animate-spin text-primary" /></div> : (
@@ -224,14 +226,14 @@ export default function Admin() {
                   <div className="space-y-3 mb-8">
                     {pending.map((d) => (
                       <div key={d.user_id} className="rounded-2xl border border-border bg-card p-4 flex flex-wrap items-center justify-between gap-3" data-testid={`pending-${d.user_id}`}>
-                        <div className="flex items-center gap-3">
-                          {d.photo ? <img src={d.photo} alt="" className="w-11 h-11 rounded-xl object-cover" referrerPolicy="no-referrer" /> : <div className="w-11 h-11 rounded-xl bg-accent flex items-center justify-center"><Stethoscope className="w-5 h-5 text-accent-foreground" /></div>}
-                          <div>
-                            <p className="font-medium">{d.name} <span className="text-xs text-muted-foreground">· {d.specialty}</span></p>
-                            <p className="text-xs text-muted-foreground">{d.email} · {d.years_experience || "?"} yrs · {d.price || "—"}</p>
+                        <div className="flex items-center gap-3 min-w-0">
+                          {d.photo ? <img src={d.photo} alt="" className="w-11 h-11 rounded-xl object-cover shrink-0" referrerPolicy="no-referrer" /> : <div className="w-11 h-11 rounded-xl bg-accent flex items-center justify-center shrink-0"><Stethoscope className="w-5 h-5 text-accent-foreground" /></div>}
+                          <div className="min-w-0">
+                            <p className="font-medium truncate">{d.name} <span className="text-xs text-muted-foreground">· {d.specialty}</span></p>
+                            <p className="text-xs text-muted-foreground truncate">{d.email} · {d.years_experience || "?"} yrs · {d.price || "—"}</p>
                           </div>
                         </div>
-                        <div className="flex items-center gap-2">
+                        <div className="flex flex-wrap items-center gap-2 w-full sm:w-auto">
                           <Button size="sm" className="rounded-full" onClick={() => setStatus(d.user_id, "approve")} data-testid={`approve-${d.user_id}`}><Check className="w-4 h-4 mr-1" /> Approve</Button>
                           <Button size="sm" variant="outline" className="rounded-full" onClick={() => setStatus(d.user_id, "reject")} data-testid={`reject-${d.user_id}`}><X className="w-4 h-4 mr-1" /> Reject</Button>
                           <Button size="icon" variant="outline" className="rounded-full h-8 w-8 text-destructive hover:bg-destructive hover:text-destructive-foreground" onClick={() => setDermToDelete(d)} aria-label={`Delete ${d.name}`} data-testid={`delete-derm-${d.user_id}`}><Trash2 className="w-3.5 h-3.5" /></Button>
@@ -245,9 +247,12 @@ export default function Admin() {
                 {others.length === 0 ? <p className="text-muted-foreground text-sm">None yet.</p> : (
                   <div className="space-y-3">
                     {others.map((d) => (
-                      <div key={d.user_id} className="rounded-2xl border border-border bg-card p-4 flex items-center justify-between gap-3">
-                        <div><p className="font-medium">{d.name} <span className="text-xs text-muted-foreground">· {d.specialty}</span></p><p className="text-xs text-muted-foreground">{d.email}</p></div>
-                        <div className="flex items-center gap-2">
+                      <div key={d.user_id} className="rounded-2xl border border-border bg-card p-4 flex flex-wrap items-center justify-between gap-3">
+                        <div className="min-w-0">
+                          <p className="font-medium truncate">{d.name} <span className="text-xs text-muted-foreground">· {d.specialty}</span></p>
+                          <p className="text-xs text-muted-foreground truncate">{d.email}</p>
+                        </div>
+                        <div className="flex flex-wrap items-center gap-2 w-full sm:w-auto">
                           <Badge variant="secondary" className="rounded-full capitalize">{d.status}</Badge>
                           {d.status !== "approved" && <Button size="sm" className="rounded-full" onClick={() => setStatus(d.user_id, "approve")}>Approve</Button>}
                           {d.status === "approved" && <Button size="sm" variant="outline" className="rounded-full" onClick={() => setStatus(d.user_id, "reject")}>Revoke</Button>}
@@ -307,11 +312,14 @@ export default function Admin() {
               <div className="space-y-3">
                 {(users || []).map((u) => (
                   <div key={u.user_id} className="rounded-2xl border border-border bg-card p-4 flex flex-wrap items-center justify-between gap-3" data-testid={`user-${u.user_id}`}>
-                    <div className="flex items-center gap-3">
-                      {u.picture ? <img src={u.picture} alt="" className="w-9 h-9 rounded-full object-cover" referrerPolicy="no-referrer" /> : <div className="w-9 h-9 rounded-full bg-accent flex items-center justify-center text-xs font-semibold">{u.name?.[0] || "U"}</div>}
-                      <div><p className="font-medium">{u.name || u.email}</p><p className="text-xs text-muted-foreground">{u.email}{u.phone && ` · ${u.phone}`}</p></div>
+                    <div className="flex items-center gap-3 min-w-0">
+                      {u.picture ? <img src={u.picture} alt="" className="w-9 h-9 rounded-full object-cover shrink-0" referrerPolicy="no-referrer" /> : <div className="w-9 h-9 rounded-full bg-accent flex items-center justify-center text-xs font-semibold shrink-0">{u.name?.[0] || "U"}</div>}
+                      <div className="min-w-0">
+                        <p className="font-medium truncate">{u.name || u.email}</p>
+                        <p className="text-xs text-muted-foreground truncate">{u.email}{u.phone && ` · ${u.phone}`}</p>
+                      </div>
                     </div>
-                    <div className="flex items-center gap-2">
+                    <div className="flex flex-wrap items-center gap-2 w-full sm:w-auto">
                       <StatusPill value={u.role} labels={ROLE_LABELS} />
                       {u.role !== "super_admin" && (
                         u.role === "admin" ? (
@@ -319,7 +327,7 @@ export default function Admin() {
                         ) : u.role === "coach" ? (
                           <Button size="sm" variant="outline" className="rounded-full" onClick={() => setRole(u.user_id, "user")} data-testid={`demote-coach-${u.user_id}`}>Remove coach</Button>
                         ) : (
-                          <div className="flex items-center gap-2">
+                          <div className="flex flex-wrap items-center gap-2">
                             <Button size="sm" className="rounded-full" onClick={() => setRole(u.user_id, "admin")} data-testid={`promote-${u.user_id}`}>Make admin</Button>
                             <Button size="sm" variant="outline" className="rounded-full" onClick={() => setRole(u.user_id, "coach")} data-testid={`promote-coach-${u.user_id}`}>Make coach</Button>
                           </div>
