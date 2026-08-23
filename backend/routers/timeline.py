@@ -12,7 +12,8 @@ router = APIRouter(tags=["timeline"])
 async def timeline(user: CurrentUser):
     sessions = await db.tracking_sessions.find({"user_id": user["user_id"]}, {"_id": 0}).sort("date", 1).to_list(1000)
     sessions = await sessions_service.attach_children(sessions)
-    return await sessions_service.attach_coach_notes(sessions)
+    sessions = await sessions_service.attach_coach_notes(sessions)
+    return await sessions_service.attach_coach_corrections(sessions)
 
 
 @router.get("/progress")

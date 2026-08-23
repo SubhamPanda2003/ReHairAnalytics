@@ -291,3 +291,135 @@ class TestCoachNotes:
         user_uid, session_id = paired["user"][0], paired["session_id"]
         r = actors["user_a"][2].post(f"{API}/coach/patients/{user_uid}/sessions/{session_id}/notes", json={"text": "not a coach"})
         assert r.status_code == 403, r.text
+
+
+# -------------------------------------------------- structured corrections
+class TestCoachCorrections:
+    @pytest.fixture(scope="class")
+    def paired(self, db, actors):
+        """Same shape as TestCoachNotes' fixture, but this session also has
+        a real analysis doc -- corrections need an AI score to correct."""
+        user = _seed(db, "coachcorruser")
+        coach = _seed(db, "coachcorrCoach", role="coach")
+        other_coach = _seed(db, "coachcorrOther", role="coach")
+        session_id = f"TEST_session_{user[0]}_{uuid.uuid4().hex[:8]}"
+        db.tracking_sessions.insert_one({
+            "id": session_id,
+            "user_id": user[0],
+            "date": datetime.now(timezone.utc).isoformat(),
+            "created_at": datetime.now(timezone.utc).isoformat(),
+        })
+        db.analysis.insert_one({
+            "id": str(uuid.uuid4()),
+            "tracking_session_id": session_id,
+            "density_score": 62,
+            "coverage_score": 70,
+            "hairline_score": 55,
+            "overall_score": 64,
+        })
+        assert actors["sa"][2].post(f"{API}/admin/users/{user[0]}/coach", json={"coach_id": coach[0]}).status_code == 200
+        assert user[2].post(f"{API}/coach/share", json={"share": True}).status_code == 200
+        yield {"user": user, "coach": coach, "other_coach": other_coach, "session_id": session_id}
+        for uid in (user[0], coach[0], other_coach[0]):
+            db.users.delete_many({"user_id": uid})
+            db.user_sessions.delete_many({"user_id": uid})
+            db.coach_corrections.delete_many({"$or": [{"patient_id": uid}, {"coach_id": uid}]})
+        db.tracking_sessions.delete_many({"id": session_id})
+        db.analysis.delete_many({"tracking_session_id": session_id})
+
+    def test_01_coach_flags_density_wrong(self, paired):
+        coach_client, user_uid, session_id = paired["coach"][2], paired["user"][0], paired["session_id"]
+        r = coach_client.post(
+            f"{API}/coach/patients/{user_uid}/sessions/{session_id}/corrections",
+            json={"metric": "density", "corrected_value": 55, "note": "crown patch looked overestimated"},
+        )
+        assert r.status_code == 200, r.text
+        body = r.json()
+        assert body["metric"] == "density"
+        assert body["ai_value"] == 62  # captured server-side from the real analysis doc, not client-supplied
+        assert body["corrected_value"] == 55
+
+    def test_invalid_metric_400(self, paired):
+        coach_client, user_uid, session_id = paired["coach"][2], paired["user"][0], paired["session_id"]
+        r = coach_client.post(
+            f"{API}/coach/patients/{user_uid}/sessions/{session_id}/corrections",
+            json={"metric": "porosity", "corrected_value": 1},
+        )
+        assert r.status_code == 400, r.text
+
+    def test_unanalyzed_session_400(self, paired, db):
+        coach_client, user_uid = paired["coach"][2], paired["user"][0]
+        bare_session_id = f"TEST_session_{user_uid}_{uuid.uuid4().hex[:8]}"
+        db.tracking_sessions.insert_one({
+            "id": bare_session_id, "user_id": user_uid,
+            "date": datetime.now(timezone.utc).isoformat(), "created_at": datetime.now(timezone.utc).isoformat(),
+        })
+        try:
+            r = coach_client.post(
+                f"{API}/coach/patients/{user_uid}/sessions/{bare_session_id}/corrections",
+                json={"metric": "density", "corrected_value": 50},
+            )
+            assert r.status_code == 400, r.text
+        finally:
+            db.tracking_sessions.delete_many({"id": bare_session_id})
+
+    def test_unrelated_coach_cannot_correct(self, paired):
+        other_coach_client, user_uid, session_id = paired["other_coach"][2], paired["user"][0], paired["session_id"]
+        r = other_coach_client.post(
+            f"{API}/coach/patients/{user_uid}/sessions/{session_id}/corrections",
+            json={"metric": "density", "corrected_value": 1},
+        )
+        assert r.status_code == 403, r.text
+
+    def test_02_correction_visible_on_owner_timeline_and_session(self, paired):
+        user_client, session_id = paired["user"][2], paired["session_id"]
+        tl = user_client.get(f"{API}/timeline")
+        s = next(s for s in tl.json() if s["id"] == session_id)
+        assert len(s["coach_corrections"]) == 1
+
+        sess = user_client.get(f"{API}/sessions/{session_id}")
+        assert len(sess.json()["coach_corrections"]) == 1
+
+    def test_03_correction_visible_on_coach_patient_timeline(self, paired):
+        coach_client, user_uid, session_id = paired["coach"][2], paired["user"][0], paired["session_id"]
+        r = coach_client.get(f"{API}/coach/patients/{user_uid}/timeline")
+        s = next(s for s in r.json() if s["id"] == session_id)
+        assert len(s["coach_corrections"]) == 1
+
+
+class TestAdminCorrections:
+    def test_admin_sees_correction_with_summary_stats(self, actors, db):
+        user = _seed(db, "admincorruser")
+        coach = _seed(db, "admincorrCoach", role="coach")
+        session_id = f"TEST_session_{user[0]}_{uuid.uuid4().hex[:8]}"
+        db.tracking_sessions.insert_one({
+            "id": session_id, "user_id": user[0],
+            "date": datetime.now(timezone.utc).isoformat(), "created_at": datetime.now(timezone.utc).isoformat(),
+        })
+        db.analysis.insert_one({"id": str(uuid.uuid4()), "tracking_session_id": session_id, "overall_score": 40})
+        try:
+            assert actors["sa"][2].post(f"{API}/admin/users/{user[0]}/coach", json={"coach_id": coach[0]}).status_code == 200
+            assert user[2].post(f"{API}/coach/share", json={"share": True}).status_code == 200
+            r = coach[2].post(
+                f"{API}/coach/patients/{user[0]}/sessions/{session_id}/corrections",
+                json={"metric": "overall", "corrected_value": 50},
+            )
+            assert r.status_code == 200, r.text
+
+            listing = actors["admin"][2].get(f"{API}/admin/corrections")
+            assert listing.status_code == 200, listing.text
+            body = listing.json()
+            row = next(c for c in body["corrections"] if c["tracking_session_id"] == session_id)
+            assert row["patient_name"] in (user[2].get(f"{API}/auth/me").json()["name"], user[2].get(f"{API}/auth/me").json()["email"])
+            assert body["summary"]["overall"]["count"] >= 1
+            assert body["summary"]["overall"]["avg_delta"] is not None
+        finally:
+            db.users.delete_many({"user_id": {"$in": [user[0], coach[0]]}})
+            db.user_sessions.delete_many({"user_id": {"$in": [user[0], coach[0]]}})
+            db.tracking_sessions.delete_many({"id": session_id})
+            db.analysis.delete_many({"tracking_session_id": session_id})
+            db.coach_corrections.delete_many({"patient_id": user[0]})
+
+    def test_plain_user_forbidden_from_corrections_list(self, actors):
+        r = actors["user_a"][2].get(f"{API}/admin/corrections")
+        assert r.status_code == 403, r.text

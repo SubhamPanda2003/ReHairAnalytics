@@ -7,9 +7,18 @@ import { useAuth } from "@/context/AuthContext";
 import Navbar from "@/components/Navbar";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
+import { Input } from "@/components/ui/input";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { toast } from "sonner";
-import { Users, Loader2, ImageOff, FileText } from "lucide-react";
+import { Users, Loader2, ImageOff, FileText, Flag } from "lucide-react";
+
+const METRICS = [
+  { value: "density", label: "Density" },
+  { value: "coverage", label: "Coverage" },
+  { value: "hairline", label: "Hairline" },
+  { value: "overall", label: "Overall" },
+];
 
 export default function CoachPortal() {
   const { user } = useAuth();
@@ -48,6 +57,32 @@ export default function CoachPortal() {
       toast.error(e.response?.data?.detail || "Could not add comment");
     } finally {
       setPosting(null);
+    }
+  };
+
+  // session_id -> { metric, value } -- the structured "flag this score" form,
+  // separate from the free-text comment draft above.
+  const [correctionDrafts, setCorrectionDrafts] = useState({});
+  const [flagging, setFlagging] = useState(null);
+
+  const setCorrectionField = (sessionId, field, value) =>
+    setCorrectionDrafts((d) => ({ ...d, [sessionId]: { metric: "overall", value: "", ...d[sessionId], [field]: value } }));
+
+  const addCorrection = async (sessionId) => {
+    const draft = correctionDrafts[sessionId] || { metric: "overall", value: "" };
+    if (draft.value === "" || Number.isNaN(Number(draft.value))) return;
+    setFlagging(sessionId);
+    try {
+      await api.post(`/coach/patients/${openPatientId}/sessions/${sessionId}/corrections`, {
+        metric: draft.metric, corrected_value: Number(draft.value),
+      });
+      setCorrectionDrafts((d) => ({ ...d, [sessionId]: { metric: draft.metric, value: "" } }));
+      qc.invalidateQueries({ queryKey: ["coach-patient-timeline", openPatientId] });
+      toast.success("Score flagged");
+    } catch (e) {
+      toast.error(e.response?.data?.detail || "Could not flag score");
+    } finally {
+      setFlagging(null);
     }
   };
 
@@ -144,6 +179,20 @@ export default function CoachPortal() {
                           </div>
                         </div>
 
+                        {(s.coach_corrections || []).length > 0 && (
+                          <div className="space-y-1.5 mb-2">
+                            {s.coach_corrections.map((c) => (
+                              <div key={c.id} className="rounded-lg bg-amber-500/10 border border-amber-500/30 px-3 py-1.5 text-sm" data-testid={`coach-correction-${c.id}`}>
+                                <p className="capitalize">
+                                  <span className="font-medium">{c.metric}:</span>{" "}
+                                  <span className="text-muted-foreground">AI said {c.ai_value ?? "—"}</span> → <span className="font-semibold">{c.corrected_value}</span>
+                                </p>
+                                {c.note && <p className="text-xs text-muted-foreground mt-0.5">{c.note}</p>}
+                              </div>
+                            ))}
+                          </div>
+                        )}
+
                         {(s.coach_notes || []).length > 0 && (
                           <div className="space-y-1.5 mb-2">
                             {s.coach_notes.map((n) => (
@@ -152,6 +201,36 @@ export default function CoachPortal() {
                                 <p className="text-[10px] text-muted-foreground mt-0.5">{n.coach_name || "Coach"} · {new Date(n.created_at).toLocaleDateString()}</p>
                               </div>
                             ))}
+                          </div>
+                        )}
+
+                        {s.analysis && (
+                          <div className="flex flex-wrap items-center gap-2 mb-2">
+                            <Select
+                              value={correctionDrafts[s.id]?.metric || "overall"}
+                              onValueChange={(v) => setCorrectionField(s.id, "metric", v)}
+                            >
+                              <SelectTrigger className="w-28 h-8 rounded-full text-xs" data-testid={`correction-metric-${s.id}`}><SelectValue /></SelectTrigger>
+                              <SelectContent>
+                                {METRICS.map((m) => <SelectItem key={m.value} value={m.value}>{m.label}</SelectItem>)}
+                              </SelectContent>
+                            </Select>
+                            <Input
+                              type="number"
+                              value={correctionDrafts[s.id]?.value ?? ""}
+                              onChange={(e) => setCorrectionField(s.id, "value", e.target.value)}
+                              placeholder="Correct value"
+                              className="w-28 h-8 rounded-full text-xs text-center"
+                              data-testid={`correction-value-${s.id}`}
+                            />
+                            <Button
+                              size="sm" variant="outline" className="rounded-full h-8 shrink-0"
+                              disabled={flagging === s.id || (correctionDrafts[s.id]?.value ?? "") === ""}
+                              onClick={() => addCorrection(s.id)}
+                              data-testid={`correction-submit-${s.id}`}
+                            >
+                              {flagging === s.id ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <><Flag className="w-3.5 h-3.5 mr-1" /> Flag</>}
+                            </Button>
                           </div>
                         )}
 

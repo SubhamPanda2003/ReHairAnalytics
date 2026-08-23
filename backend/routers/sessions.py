@@ -55,6 +55,7 @@ async def get_session(session_id: str, user: CurrentUser):
     # the baseline photo when a distinct baseline exists.
     s.update(await sessions_service.get_comparison_context(user["user_id"], session_id))
     await sessions_service.attach_coach_notes([s])
+    await sessions_service.attach_coach_corrections([s])
     return s
 
 

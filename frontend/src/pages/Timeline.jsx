@@ -145,9 +145,15 @@ export default function Timeline() {
                         <Trash2 className="w-4 h-4" />
                       </button>
                     </div>
-                    {(s.coach_notes || []).length > 0 && (
+                    {((s.coach_corrections || []).length > 0 || (s.coach_notes || []).length > 0) && (
                       <div className="mt-3 pt-3 border-t border-border space-y-1.5">
-                        {s.coach_notes.map((n) => (
+                        {(s.coach_corrections || []).map((c) => (
+                          <div key={c.id} className="rounded-lg bg-amber-500/10 px-3 py-1.5 text-xs capitalize" data-testid={`coach-correction-${c.id}`}>
+                            <span className="font-medium">{c.metric}:</span> AI said {c.ai_value ?? "—"} → coach says {c.corrected_value}
+                            {c.note && <span className="normal-case text-muted-foreground"> — {c.note}</span>}
+                          </div>
+                        ))}
+                        {(s.coach_notes || []).map((n) => (
                           <div key={n.id} className="rounded-lg bg-accent/40 px-3 py-1.5 text-xs" data-testid={`coach-note-${n.id}`}>
                             <span className="font-medium">{n.coach_name || "Coach"}:</span> {n.text}
                           </div>

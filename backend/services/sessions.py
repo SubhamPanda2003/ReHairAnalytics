@@ -476,6 +476,25 @@ async def attach_coach_notes(sessions: list[dict]) -> list[dict]:
     return sessions
 
 
+async def attach_coach_corrections(sessions: list[dict]) -> list[dict]:
+    """Hydrate each tracking session with any structured hair-coach score
+    corrections left on it (see routers/coach.py's .../corrections). Unlike
+    attach_coach_notes' free-text commentary, each of these is a captured
+    (ai_value, corrected_value) pair for a specific metric -- the actual
+    data-flywheel asset a "human-reviewed" claim needs to be more than
+    marketing copy."""
+    ids = [s["id"] for s in sessions]
+    if not ids:
+        return sessions
+    corrections = await db.coach_corrections.find({"tracking_session_id": {"$in": ids}}, {"_id": 0}).sort("created_at", 1).to_list(5000)
+    by_session: dict[str, list[dict]] = {}
+    for c in corrections:
+        by_session.setdefault(c["tracking_session_id"], []).append(c)
+    for s in sessions:
+        s["coach_corrections"] = by_session.get(s["id"], [])
+    return sessions
+
+
 _BLEND_KEYS = ("density_score", "coverage_score", "overall_score", "confidence",
                "quality_score", "visible_scalp_pct", "hair_coverage_pct")
 

@@ -16,7 +16,7 @@ import {
   AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 import { toast } from "sonner";
-import { ShieldCheck, Check, X, Loader2, Stethoscope, UserCog, Crown, Zap, Minus, Plus, Trash2, Users } from "lucide-react";
+import { ShieldCheck, Check, X, Loader2, Stethoscope, UserCog, Crown, Zap, Minus, Plus, Trash2, Users, Flag } from "lucide-react";
 
 const ROLE_LABELS = {
   super_admin: ["Super admin", "bg-primary/15 text-primary"],
@@ -132,6 +132,7 @@ export default function Admin() {
   const { data: settings } = useQuery({ queryKey: ["admin-settings"], queryFn: async () => (await api.get("/admin/settings")).data, enabled: isAdmin });
   const { data: coaches } = useQuery({ queryKey: ["admin-coaches"], queryFn: async () => (await api.get("/admin/coaches")).data, enabled: isAdmin });
   const { data: coachAssignments } = useQuery({ queryKey: ["admin-coach-assignments"], queryFn: async () => (await api.get("/admin/coach-assignments")).data, enabled: isAdmin });
+  const { data: corrections } = useQuery({ queryKey: ["admin-corrections"], queryFn: async () => (await api.get("/admin/corrections")).data, enabled: isAdmin });
 
   if (!isAdmin) {
     return (
@@ -214,6 +215,7 @@ export default function Admin() {
               <TabsTrigger value="derms" className="rounded-full whitespace-nowrap" data-testid="tab-derms"><Stethoscope className="w-4 h-4 mr-1.5" /> Dermatologists</TabsTrigger>
               <TabsTrigger value="credits" className="rounded-full whitespace-nowrap" data-testid="tab-credits"><Zap className="w-4 h-4 mr-1.5" /> Scan credits</TabsTrigger>
               <TabsTrigger value="coaches" className="rounded-full whitespace-nowrap" data-testid="tab-coaches"><Users className="w-4 h-4 mr-1.5" /> Coaches</TabsTrigger>
+              <TabsTrigger value="quality" className="rounded-full whitespace-nowrap" data-testid="tab-quality"><Flag className="w-4 h-4 mr-1.5" /> Data quality</TabsTrigger>
               {isSuper && <TabsTrigger value="users" className="rounded-full whitespace-nowrap" data-testid="tab-users"><UserCog className="w-4 h-4 mr-1.5" /> Users</TabsTrigger>}
             </TabsList>
           </div>
@@ -304,6 +306,43 @@ export default function Admin() {
               <div className="space-y-3">
                 {coachAssignments.map((row) => <CoachAssignRow key={row.user_id} row={row} coaches={coaches || []} onAssign={assignCoach} />)}
               </div>
+            )}
+          </TabsContent>
+
+          <TabsContent value="quality" className="mt-6">
+            <p className="text-sm text-muted-foreground mb-6">
+              Every time a coach flags an AI score as wrong, it's logged here as an (AI value → corrected value) pair —
+              this is the actual data behind "Expert-Reviewed," not just the claim.
+            </p>
+            {!corrections ? <div className="flex justify-center py-12"><Loader2 className="w-6 h-6 animate-spin text-primary" /></div> : corrections.corrections.length === 0 ? (
+              <p className="text-muted-foreground text-sm">No corrections logged yet.</p>
+            ) : (
+              <>
+                <div className="grid sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
+                  {Object.entries(corrections.summary).map(([metric, st]) => (
+                    <div key={metric} className="rounded-2xl border border-border bg-card p-4" data-testid={`quality-summary-${metric}`}>
+                      <p className="text-xs uppercase tracking-[0.15em] text-muted-foreground capitalize">{metric}</p>
+                      <p className="font-heading text-2xl font-bold mt-1">{st.count} <span className="text-sm font-normal text-muted-foreground">correction{st.count === 1 ? "" : "s"}</span></p>
+                      <p className="text-xs text-muted-foreground mt-1">
+                        Avg bias {st.avg_delta > 0 ? "+" : ""}{st.avg_delta} · avg miss {st.avg_abs_delta}
+                      </p>
+                    </div>
+                  ))}
+                </div>
+                <div className="space-y-3">
+                  {corrections.corrections.map((c) => (
+                    <div key={c.id} className="rounded-2xl border border-border bg-card p-4 flex flex-wrap items-center justify-between gap-3" data-testid={`correction-${c.id}`}>
+                      <div className="min-w-0">
+                        <p className="font-medium truncate capitalize">{c.metric}: AI said {c.ai_value ?? "—"} → {c.corrected_value}</p>
+                        <p className="text-xs text-muted-foreground truncate">
+                          {c.patient_name} · flagged by {c.coach_name || "a coach"} · {new Date(c.created_at).toLocaleDateString()}
+                          {c.note && ` — "${c.note}"`}
+                        </p>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </>
             )}
           </TabsContent>
 

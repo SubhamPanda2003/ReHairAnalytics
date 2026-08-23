@@ -8,10 +8,18 @@ from fastapi import APIRouter, HTTPException
 
 from models.database import db
 from utils.deps import CurrentUser, require_roles
-from models.schemas import CoachNoteIn, CoachShareIn
+from models.schemas import CoachCorrectionIn, CoachNoteIn, CoachShareIn
 from services import sessions as sessions_service
 
 router = APIRouter(prefix="/coach", tags=["coach"])
+
+# metric key (what the coach picks) -> the field it corrects on the analysis doc
+CORRECTION_METRICS = {
+    "density": "density_score",
+    "coverage": "coverage_score",
+    "hairline": "hairline_score",
+    "overall": "overall_score",
+}
 
 
 def _shared_with(patient: dict | None, coach_user_id: str) -> bool:
@@ -73,7 +81,8 @@ async def patient_timeline(patient_user_id: str, user: CurrentUser):
         raise HTTPException(status_code=403, detail="Not shared with you")
     sessions = await db.tracking_sessions.find({"user_id": patient_user_id}, {"_id": 0}).sort("date", 1).to_list(1000)
     sessions = await sessions_service.attach_children(sessions)
-    return await sessions_service.attach_coach_notes(sessions)
+    sessions = await sessions_service.attach_coach_notes(sessions)
+    return await sessions_service.attach_coach_corrections(sessions)
 
 
 @router.post("/patients/{patient_user_id}/sessions/{session_id}/notes")
@@ -100,3 +109,40 @@ async def add_note(patient_user_id: str, session_id: str, body: CoachNoteIn, use
     await db.coach_notes.insert_one(dict(note))
     note.pop("_id", None)
     return note
+
+
+@router.post("/patients/{patient_user_id}/sessions/{session_id}/corrections")
+async def add_correction(patient_user_id: str, session_id: str, body: CoachCorrectionIn, user: CurrentUser):
+    """Structured (AI value -> coach-corrected value) capture for one score
+    on one scan -- the actual data-flywheel asset, distinct from the
+    free-text /notes above. ai_value is read from the session's own analysis
+    doc server-side (never trusted from the client) so the pair is always
+    accurate to what the AI actually produced at submission time."""
+    require_roles(user, "coach")
+    if body.metric not in CORRECTION_METRICS:
+        raise HTTPException(status_code=400, detail=f"metric must be one of {sorted(CORRECTION_METRICS)}")
+    patient = await db.users.find_one({"user_id": patient_user_id}, {"_id": 0})
+    if not _shared_with(patient, user["user_id"]):
+        raise HTTPException(status_code=403, detail="Not shared with you")
+    session = await db.tracking_sessions.find_one({"id": session_id, "user_id": patient_user_id}, {"_id": 0})
+    if not session:
+        raise HTTPException(status_code=404, detail="Session not found")
+    analysis = await db.analysis.find_one({"tracking_session_id": session_id}, {"_id": 0})
+    if not analysis:
+        raise HTTPException(status_code=400, detail="This scan hasn't been analyzed yet")
+    note = (body.note or "").strip() or None
+    correction = {
+        "id": str(uuid.uuid4()),
+        "tracking_session_id": session_id,
+        "patient_id": patient_user_id,
+        "coach_id": user["user_id"],
+        "coach_name": user.get("name", ""),
+        "metric": body.metric,
+        "ai_value": analysis.get(CORRECTION_METRICS[body.metric]),
+        "corrected_value": body.corrected_value,
+        "note": note,
+        "created_at": datetime.now(timezone.utc).isoformat(),
+    }
+    await db.coach_corrections.insert_one(dict(correction))
+    correction.pop("_id", None)
+    return correction

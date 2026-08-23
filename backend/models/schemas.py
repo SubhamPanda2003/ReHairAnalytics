@@ -65,3 +65,9 @@ class CoachShareIn(BaseModel):
 
 class CoachNoteIn(BaseModel):
     text: str
+
+
+class CoachCorrectionIn(BaseModel):
+    metric: str
+    corrected_value: float
+    note: Optional[str] = None

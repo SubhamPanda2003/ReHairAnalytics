@@ -206,6 +206,37 @@ async def admin_coach_assignments(user: CurrentUser):
     ]
 
 
+@router.get("/corrections")
+async def admin_list_corrections(user: CurrentUser):
+    """The actual data-flywheel asset behind an "Expert-Reviewed" claim:
+    every (AI value -> coach-corrected value) pair logged so far, plus
+    per-metric aggregate stats -- avg_delta shows systematic bias (AI runs
+    consistently high/low on a metric), avg_abs_delta shows how far off a
+    typical correction is, regardless of direction."""
+    require_roles(user, "admin", "super_admin")
+    corrections = await db.coach_corrections.find({}, {"_id": 0}).sort("created_at", -1).to_list(5000)
+    patients = {
+        u["user_id"]: u.get("name") or u.get("email")
+        for u in await db.users.find({}, {"_id": 0, "user_id": 1, "name": 1, "email": 1}).to_list(5000)
+    }
+    rows = [{**c, "patient_name": patients.get(c["patient_id"], c["patient_id"])} for c in corrections]
+
+    stats: dict[str, dict] = {}
+    for c in corrections:
+        if c.get("ai_value") is None:
+            continue
+        st = stats.setdefault(c["metric"], {"count": 0, "sum_delta": 0.0, "sum_abs_delta": 0.0})
+        delta = c["corrected_value"] - c["ai_value"]
+        st["count"] += 1
+        st["sum_delta"] += delta
+        st["sum_abs_delta"] += abs(delta)
+    summary = {
+        m: {"count": st["count"], "avg_delta": round(st["sum_delta"] / st["count"], 2), "avg_abs_delta": round(st["sum_abs_delta"] / st["count"], 2)}
+        for m, st in stats.items()
+    }
+    return {"corrections": rows, "summary": summary}
+
+
 @router.post("/users/{target_user_id}/coach")
 async def admin_assign_coach(target_user_id: str, body: CoachAssignIn, user: CurrentUser):
     """Pairing is admin-managed and 1:1. Setting or changing it always resets
