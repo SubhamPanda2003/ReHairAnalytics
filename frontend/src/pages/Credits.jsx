@@ -1,4 +1,4 @@
-import React from "react";
+import React, { useEffect } from "react";
 import { useAuth } from "@/context/AuthContext";
 import Navbar from "@/components/Navbar";
 import BuyCreditsButton from "@/components/BuyCreditsButton";
@@ -8,6 +8,16 @@ export default function Credits() {
   const { user, quota } = useAuth();
   const unlimited = user?.role !== "user" || quota?.limit == null;
   const exhausted = !unlimited && quota.remaining <= 0;
+
+  useEffect(() => {
+    // React Router doesn't trigger a real page load, so the base Meta Pixel
+    // snippet in public/index.html only ever fires PageView once -- this is
+    // a separate, explicit fire for this specific page since it's the one
+    // most relevant to ad conversion tracking (viewing pricing/credits).
+    if (typeof window.fbq === "function") {
+      window.fbq("track", "ViewContent", { content_name: "Credits" });
+    }
+  }, []);
 
   return (
     <div className="min-h-screen bg-background" data-testid="credits-page">
