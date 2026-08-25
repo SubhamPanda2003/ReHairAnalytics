@@ -42,7 +42,7 @@ export default function Credits() {
             <p className="font-medium mb-1">Starter Pack</p>
             <p className="text-sm text-muted-foreground mb-4">100 credits — enough for 100 normal scans or a mix with precision scans.</p>
             <div className="flex items-center justify-between">
-              <span className="text-2xl font-heading font-bold">₹499</span>
+              <span className="text-2xl font-heading font-bold">₹1</span>
               <BuyCreditsButton className="rounded-full" label="Buy now" />
             </div>
           </div>

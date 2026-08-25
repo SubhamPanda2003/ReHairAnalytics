@@ -18,9 +18,9 @@ from utils import config
 
 _client = razorpay.Client(auth=(config.RAZORPAY_KEY_ID, config.RAZORPAY_KEY_SECRET))
 
-# Amount in paise (Razorpay's smallest INR unit) -- 49900 paise = Rs 499.
+# Amount in paise (Razorpay's smallest INR unit) -- 100 paise = Rs 1.
 PRODUCTS = {
-    "starter_pack": {"name": "Starter Pack", "credits": 100, "amount": 49900, "currency": "INR"},
+    "starter_pack": {"name": "Starter Pack", "credits": 100, "amount": 100, "currency": "INR"},
 }
 
 
