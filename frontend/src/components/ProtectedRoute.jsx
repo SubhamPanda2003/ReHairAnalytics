@@ -4,7 +4,7 @@ import { useAuth } from "@/context/AuthContext";
 import { Loader2 } from "lucide-react";
 import ScanLimitBlocker from "@/components/ScanLimitBlocker";
 
-export default function ProtectedRoute({ children }) {
+export default function ProtectedRoute({ children, requireCredits = false }) {
   const { user, loading, quota } = useAuth();
   const location = useLocation();
 
@@ -18,9 +18,11 @@ export default function ProtectedRoute({ children }) {
   if (!user) return <Navigate to="/" replace state={{ from: location }} />;
 
   // Only plain "user" accounts carry a scan quota (see backend
-  // services/quota.py) -- exhausting it freezes every route behind this
-  // guard, not just the scan/upload flow, until an admin raises the limit.
-  if (user.role === "user" && quota?.limit != null && quota.remaining <= 0) {
+  // services/quota.py). Exhausting it only blocks routes that opt in via
+  // requireCredits (Dashboard, New Scan) -- Timeline, Consult, Settings and
+  // Credits itself stay reachable so a user can still see their history or
+  // buy more credits without being locked out of the whole app.
+  if (requireCredits && user.role === "user" && quota?.limit != null && quota.remaining <= 0) {
     return <ScanLimitBlocker message={quota.exhausted_message} whatsappNumber={quota.whatsapp_number} />;
   }
   return children;

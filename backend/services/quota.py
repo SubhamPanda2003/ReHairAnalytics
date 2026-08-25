@@ -23,8 +23,8 @@ DEFAULT_SETTINGS = {
 # value that happens to be sitting on their user doc.
 LIMITED_ROLES = {"user"}
 
-SCAN_CREDIT_COST = 1
-PRECISION_SCAN_CREDIT_COST = 3
+SCAN_CREDIT_COST = 2
+PRECISION_SCAN_CREDIT_COST = 10
 
 
 async def get_settings() -> dict:

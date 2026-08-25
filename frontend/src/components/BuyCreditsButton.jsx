@@ -67,7 +67,7 @@ export default function BuyCreditsButton({ productId = "starter_pack", label, cl
   return (
     <Button onClick={buy} disabled={busy} className={className} variant={variant} data-testid="buy-credits-btn">
       {busy ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Sparkles className="w-4 h-4 mr-2" />}
-      {label || "Buy 100 credits — ₹1"}
+      {label || "Buy 20 credits — ₹100"}
     </Button>
   );
 }

@@ -31,8 +31,8 @@ function AppRouter() {
     <Routes>
       <Route path="/" element={<Landing />} />
       <Route path="/onboarding" element={<ProtectedRoute><Onboarding /></ProtectedRoute>} />
-      <Route path="/dashboard" element={<ProtectedRoute><Dashboard /></ProtectedRoute>} />
-      <Route path="/upload" element={<ProtectedRoute><UploadPage /></ProtectedRoute>} />
+      <Route path="/dashboard" element={<ProtectedRoute requireCredits><Dashboard /></ProtectedRoute>} />
+      <Route path="/upload" element={<ProtectedRoute requireCredits><UploadPage /></ProtectedRoute>} />
       <Route path="/results/:sessionId" element={<ProtectedRoute><Results /></ProtectedRoute>} />
       <Route path="/timeline" element={<ProtectedRoute><Timeline /></ProtectedRoute>} />
       <Route path="/credits" element={<ProtectedRoute><Credits /></ProtectedRoute>} />

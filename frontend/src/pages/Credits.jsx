@@ -2,11 +2,12 @@ import React from "react";
 import { useAuth } from "@/context/AuthContext";
 import Navbar from "@/components/Navbar";
 import BuyCreditsButton from "@/components/BuyCreditsButton";
-import { CreditCard, Camera, Sparkles as SparklesIcon } from "lucide-react";
+import { CreditCard, Camera, Sparkles as SparklesIcon, Lock } from "lucide-react";
 
 export default function Credits() {
   const { user, quota } = useAuth();
   const unlimited = user?.role !== "user" || quota?.limit == null;
+  const exhausted = !unlimited && quota.remaining <= 0;
 
   return (
     <div className="min-h-screen bg-background" data-testid="credits-page">
@@ -14,6 +15,18 @@ export default function Credits() {
       <main className="max-w-3xl mx-auto px-5 md:px-8 py-8">
         <h1 className="font-heading text-3xl font-bold tracking-tight mb-2">Credits</h1>
         <p className="text-muted-foreground mb-8">Every scan uses credits — top up anytime, they never expire.</p>
+
+        {exhausted && (
+          <div className="rounded-2xl border border-destructive/30 bg-destructive/5 p-6 mb-6 flex items-start gap-3" data-testid="credits-exhausted-banner">
+            <div className="w-9 h-9 rounded-xl bg-destructive/10 flex items-center justify-center shrink-0">
+              <Lock className="w-4 h-4 text-destructive" />
+            </div>
+            <div>
+              <p className="font-medium">Out of scan credits</p>
+              <p className="text-sm text-muted-foreground mt-0.5">{quota.exhausted_message}</p>
+            </div>
+          </div>
+        )}
 
         <div className="rounded-2xl border border-border bg-card p-6 mb-6">
           <div className="flex items-center gap-3 mb-1">
@@ -40,9 +53,9 @@ export default function Credits() {
         {!unlimited && (
           <div className="rounded-2xl border border-border bg-card p-6">
             <p className="font-medium mb-1">Starter Pack</p>
-            <p className="text-sm text-muted-foreground mb-4">100 credits — enough for 100 normal scans or a mix with precision scans.</p>
+            <p className="text-sm text-muted-foreground mb-4">20 credits — enough for 10 normal scans, or a mix with precision scans.</p>
             <div className="flex items-center justify-between">
-              <span className="text-2xl font-heading font-bold">₹1</span>
+              <span className="text-2xl font-heading font-bold">₹100</span>
               <BuyCreditsButton className="rounded-full" label="Buy now" />
             </div>
           </div>
