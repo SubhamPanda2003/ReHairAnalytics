@@ -13,6 +13,7 @@ import Dashboard from "@/pages/Dashboard";
 import UploadPage from "@/pages/Upload";
 import Results from "@/pages/Results";
 import Timeline from "@/pages/Timeline";
+import Credits from "@/pages/Credits";
 import Settings from "@/pages/Settings";
 import Report from "@/pages/Report";
 import Dermatologists from "@/pages/Dermatologists";
@@ -34,6 +35,7 @@ function AppRouter() {
       <Route path="/upload" element={<ProtectedRoute><UploadPage /></ProtectedRoute>} />
       <Route path="/results/:sessionId" element={<ProtectedRoute><Results /></ProtectedRoute>} />
       <Route path="/timeline" element={<ProtectedRoute><Timeline /></ProtectedRoute>} />
+      <Route path="/credits" element={<ProtectedRoute><Credits /></ProtectedRoute>} />
       <Route path="/report" element={<ProtectedRoute><Report /></ProtectedRoute>} />
       <Route path="/dermatologists" element={<ProtectedRoute><Dermatologists /></ProtectedRoute>} />
       <Route path="/derm" element={<ProtectedRoute><DermPractice /></ProtectedRoute>} />
