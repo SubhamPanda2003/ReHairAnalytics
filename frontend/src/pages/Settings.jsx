@@ -12,13 +12,14 @@ import {
   AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger,
 } from "@/components/ui/alert-dialog";
 import { toast } from "sonner";
-import { Moon, Download, ImageDown, Trash2, ShieldCheck, Ruler, Loader2, Bell, UserRound } from "lucide-react";
+import { Moon, Download, ImageDown, Trash2, ShieldCheck, Ruler, Loader2, Bell, UserRound, Sparkles } from "lucide-react";
+import BuyCreditsButton from "@/components/BuyCreditsButton";
 
 const DAYS = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
 
 export default function Settings() {
   const navigate = useNavigate();
-  const { user, logout } = useAuth();
+  const { user, logout, quota } = useAuth();
   const qc = useQueryClient();
   const { data: coachInfo } = useQuery({ queryKey: ["my-coach"], queryFn: async () => (await api.get("/coach/mine")).data });
   const [dark, setDark] = useState(document.documentElement.classList.contains("dark"));
@@ -105,6 +106,19 @@ export default function Settings() {
       <main className="max-w-3xl mx-auto px-5 md:px-8 py-8">
         <h1 className="font-heading text-3xl font-bold tracking-tight mb-2">Settings</h1>
         <p className="text-muted-foreground mb-8">{user?.name} · {user?.email}</p>
+
+        {user?.role === "user" && quota?.limit != null && (
+          <div className="rounded-2xl border border-border bg-card px-6 mb-6">
+            <Row
+              icon={Sparkles}
+              title="Scan credits"
+              desc={`${quota.remaining} of ${quota.limit} remaining. A normal scan costs ${quota.scan_cost}, a precision scan costs ${quota.precision_scan_cost}.`}
+              testId="setting-credits"
+            >
+              <BuyCreditsButton className="rounded-full" label="Buy 100 — ₹499" />
+            </Row>
+          </div>
+        )}
 
         <div className="rounded-2xl border border-border bg-card px-6 mb-6">
           <Row icon={Moon} title="Dark mode" desc="Switch to the clinical night view." testId="setting-dark">

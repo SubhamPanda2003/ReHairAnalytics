@@ -8,6 +8,16 @@ class SessionExchange(BaseModel):
     session_id: str
 
 
+class CreateOrderIn(BaseModel):
+    product_id: str = "starter_pack"
+
+
+class VerifyPaymentIn(BaseModel):
+    razorpay_order_id: str
+    razorpay_payment_id: str
+    razorpay_signature: str
+
+
 class ProfileIn(BaseModel):
     age: Optional[int] = None
     gender: Optional[str] = None

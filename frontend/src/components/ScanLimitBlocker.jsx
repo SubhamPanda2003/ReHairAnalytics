@@ -1,6 +1,7 @@
 import React from "react";
 import { useAuth } from "@/context/AuthContext";
 import { Button } from "@/components/ui/button";
+import BuyCreditsButton from "@/components/BuyCreditsButton";
 import { Lock, MessageCircle, LogOut } from "lucide-react";
 
 /** Full-screen block shown in place of the app once a user has run out of
@@ -19,9 +20,10 @@ export default function ScanLimitBlocker({ message, whatsappNumber }) {
         </div>
         <h1 className="font-heading text-2xl font-bold">Out of scan credits</h1>
         <p className="text-muted-foreground mt-2">{message}</p>
+        <BuyCreditsButton className="rounded-full w-full mt-6" />
         {waLink && (
-          <a href={waLink} target="_blank" rel="noreferrer" className="block mt-6">
-            <Button className="rounded-full w-full">
+          <a href={waLink} target="_blank" rel="noreferrer" className="block mt-3">
+            <Button variant="outline" className="rounded-full w-full">
               <MessageCircle className="w-4 h-4 mr-2" /> WhatsApp us{whatsappNumber ? ` at ${whatsappNumber}` : ""}
             </Button>
           </a>

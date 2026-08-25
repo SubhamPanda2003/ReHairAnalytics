@@ -7,7 +7,7 @@ from starlette.middleware.cors import CORSMiddleware
 from utils import config
 from services import storage as store
 from models.database import close_client
-from routers import account, admin, appointments, auth, coach, dermatologists, files, profile, sessions, timeline
+from routers import account, admin, appointments, auth, coach, dermatologists, files, payments, profile, sessions, timeline
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s")
 logger = logging.getLogger(__name__)
@@ -23,6 +23,7 @@ DOMAIN_ROUTERS = (
     admin.router,
     appointments.router,
     coach.router,
+    payments.router,
 )
 
 
