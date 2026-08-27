@@ -94,7 +94,7 @@ export default function Landing() {
                 <Stethoscope className="w-4 h-4 mr-1.5" /> Find a Dermatologist
               </Button>
             </div>
-            <p className="mt-3 text-sm text-muted-foreground">No credit card · Google sign-in</p>
+            <p className="mt-3 text-sm text-muted-foreground">500+ scans tracked so far · No credit card · Google sign-in</p>
           </motion.div>
 
           <motion.div initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }} transition={{ duration: 0.7, delay: 0.1 }} className="lg:col-span-5">
