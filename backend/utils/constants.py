@@ -112,13 +112,23 @@ CAPTURE_NOISE_FLOOR = 8
 # --- Image alignment (utils/image_utils.py) ---
 MIN_ALIGN_MATCHES = 10
 
-# Stricter than MIN_ALIGN_MATCHES on purpose: that constant only gates whether
-# a diff-heatmap/framing_note is trustworthy (a visual aid, low stakes if
-# wrong). This one gates whether image_utils.align_to_reference() actually
-# WARPS a photo before it's sent to the AI for scoring -- a bad correction
-# there corrupts the measurement itself, so it demands a much more confident
-# match before touching the photo at all.
+# Stricter than MIN_ALIGN_MATCHES. Originally reserved for align_to_reference()
+# alone (gating whether it WARPS a photo before it's sent to the AI for
+# scoring -- a bad correction there corrupts the measurement itself). Now also
+# used by compare_photos() to decide its own "aligned" flag: a visual change
+# map that confidently claims "aligned" under a bar the scoring pipeline
+# wouldn't trust is worse than no claim at all, so both should mean the same
+# thing. MIN_ALIGN_MATCHES still gates whether ANY homography/diff is
+# attempted at all (below it, there's nothing to even evaluate against this
+# stricter bar).
 ALIGN_CORRECTION_MIN_MATCHES = 25
+
+# Paired with ALIGN_CORRECTION_MIN_MATCHES: a homography can clear the match-count
+# bar and still imply an implausible zoom change if the matched features are a
+# coincidental overlap rather than a real correspondence. Shared by
+# align_to_reference() and compare_photos() so "aligned" means the same thing
+# in both places.
+MAX_ALIGN_SCALE_SHIFT_PCT = 25.0
 
 # Laplacian-variance floor below which a captured frame is treated as too
 # blurry to score at all -- a free, deterministic reject-gate that doesn't

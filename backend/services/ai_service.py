@@ -272,24 +272,33 @@ async def analyze_metrics(
 async def generate_summary(
     current: dict, previous: dict, baseline: dict, session_id: str,
     current_b64: str = None, baseline_b64: str = None, heatmap_b64: str = None,
+    framing_note: dict = None,
 ) -> str:
     """Write the "AI insight" shown on Results/Report. When photo(s) are
     available, the model actually looks at them instead of only being handed
     numbers -- a text-only prompt can only ever restate a score delta in words,
     which reads as generic ("density improved slightly, keep it up"). Given the
-    photos and the change-map heatmap, it can say WHERE it sees change (or
-    doesn't), and whether that visual evidence agrees with the reported score
-    movement or looks like normal photo-to-photo variation instead.
+    photos, it can say WHERE it sees change (or doesn't), and whether that
+    visual evidence agrees with the reported score movement or looks like
+    normal photo-to-photo variation instead.
+
+    `framing_note` is compute_visual_context's CV-computed alignment check
+    (image_utils.compare_photos' aligned/match_count/scale_shift_pct) -- fed
+    in as grounding context so the model's comparability caveat is driven by
+    an actual measurement, not left to guess from the photos alone.
     """
     system = (
         "You are giving a hair-tracking user genuine, specific insight into their own photos and "
         "measurements -- not a script that recites numbers back at them. When photos are provided, "
-        "actually describe what's visible: where hair looks fuller or thinner, whether any visible "
-        "change looks concentrated in one area or spread evenly, and whether what you see agrees "
-        "with the reported score movement or looks like normal photo-to-photo variation instead. "
-        "If a change-map image is provided, it's the two photos aligned and diffed -- warmer "
-        "(red/yellow) areas mark more visible pixel change, cooler (blue) areas mark little to none; "
-        "describe roughly where the change is, don't just mention that a map was given. "
+        "compare the current and baseline photos DIRECTLY: describe where hair looks fuller or "
+        "thinner, whether any visible change looks concentrated in one area or spread evenly, and "
+        "whether what you see agrees with the reported score movement or looks like normal "
+        "photo-to-photo variation instead. If a change-map image is also given, treat it only as a "
+        "rough supporting visual, never as ground truth -- it can be misleading when the two photos "
+        "differ in lighting, distance, or angle, so don't over-trust its colors on their own; the "
+        "real photos are the primary evidence. You'll also be told whether the photos could be "
+        "reliably aligned for comparison -- if they could NOT, say so plainly and specifically (not "
+        "a generic hedge), and be correspondingly more cautious about claiming visible change. "
         "Never diagnose disease, never use clinical staging language, never invent a measurement you "
         "weren't given. End with exactly one specific tip grounded in what you actually observed -- "
         "not a generic reminder to be consistent. Keep the whole response under 130 words."
@@ -310,7 +319,25 @@ async def generate_summary(
     if baseline_b64:
         image_notes.append("Image 2 is the baseline photo to compare against.")
     if heatmap_b64:
-        image_notes.append("Image 3 is the change-map (aligned diff, warm = more visible change).")
+        image_notes.append("Image 3 is a rough change-map visual aid (aligned diff, warm = more visible change) -- a supporting hint only, not ground truth.")
+
+    framing_line = ""
+    if framing_note is not None:
+        if framing_note.get("aligned"):
+            framing_line = "Photo alignment check: current and baseline were reliably aligned for comparison.\n"
+        else:
+            detail = []
+            if framing_note.get("match_count") is not None:
+                detail.append(f"only {framing_note['match_count']} matched features found")
+            if framing_note.get("scale_shift_pct") is not None:
+                detail.append(f"~{framing_note['scale_shift_pct']}% apparent distance/zoom difference from baseline")
+            detail_txt = f" ({'; '.join(detail)})" if detail else ""
+            framing_line = (
+                f"Photo alignment check: current and baseline could NOT be reliably aligned{detail_txt} -- "
+                "they likely differ meaningfully in distance, angle, or framing. State this plainly and be "
+                "correspondingly more cautious about claiming visible change.\n"
+            )
+
     prompt = (
         "Structured metrics (0-100 scale).\n"
         f"Current: density={current.get('density_score')}, coverage={current.get('coverage_score')}, "
@@ -319,6 +346,7 @@ async def generate_summary(
         f"coverage={diff(current, previous, 'coverage_score')}, hairline={diff(current, previous, 'hairline_score')}.\n"
         f"Change vs baseline: density={diff(current, baseline, 'density_score')}, "
         f"coverage={diff(current, baseline, 'coverage_score')}, hairline={diff(current, baseline, 'hairline_score')}.\n"
+        + framing_line
         + (" ".join(image_notes) + "\n" if image_notes else "")
         + "Write the insight now: describe what you actually observe, relate it to the measurements "
         "above, and end with one specific, grounded tip."

@@ -3,7 +3,10 @@ import cv2
 import numpy as np
 from PIL import Image, ImageOps
 
-from .constants import MIN_ALIGN_MATCHES, ALIGN_CORRECTION_MIN_MATCHES, BLUR_VARIANCE_MIN, SCALP_MARGIN_MIN
+from .constants import (
+    MIN_ALIGN_MATCHES, ALIGN_CORRECTION_MIN_MATCHES, MAX_ALIGN_SCALE_SHIFT_PCT,
+    BLUR_VARIANCE_MIN, SCALP_MARGIN_MIN,
+)
 
 
 def process_image(data: bytes, max_dim: int = 1600, quality: int = 82):
@@ -98,10 +101,23 @@ def blur_variance(image_bytes: bytes, max_dim: int = 1024) -> "float | None":
     return float(cv2.Laplacian(gray, cv2.CV_64F).var())
 
 
-def normalize_lighting(image_bytes: bytes, quality: int = 85) -> "bytes | None":
+def _clahe_bgr(img_bgr: np.ndarray) -> np.ndarray:
     """CLAHE (contrast-limited adaptive histogram equalization) on the
     luminance channel only (LAB color space, so hue/saturation are untouched)
-    -- normalizes exposure/contrast differences between photos taken under
+    -- the actual array-level step normalize_lighting wraps with a bytes-in/
+    bytes-out interface. Split out so callers that already hold a decoded
+    array (compare_photos) can normalize in place without a redundant
+    JPEG encode/decode round-trip.
+    """
+    lab = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2LAB)
+    l, a, b = cv2.split(lab)
+    clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
+    l = clahe.apply(l)
+    return cv2.cvtColor(cv2.merge((l, a, b)), cv2.COLOR_LAB2BGR)
+
+
+def normalize_lighting(image_bytes: bytes, quality: int = 85) -> "bytes | None":
+    """Normalizes exposure/contrast differences between photos taken under
     different lighting, one of the measured contributors to capture noise
     (see CAPTURE_NOISE_FLOOR's docstring: +/-15% brightness was part of that
     perturbation test). Only meant to be applied to the copy of a photo sent
@@ -112,11 +128,7 @@ def normalize_lighting(image_bytes: bytes, quality: int = 85) -> "bytes | None":
     img = _decode_bgr(image_bytes)
     if img is None:
         return None
-    lab = cv2.cvtColor(img, cv2.COLOR_BGR2LAB)
-    l, a, b = cv2.split(lab)
-    clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
-    l = clahe.apply(l)
-    normalized = cv2.cvtColor(cv2.merge((l, a, b)), cv2.COLOR_LAB2BGR)
+    normalized = _clahe_bgr(img)
     ok, buf = cv2.imencode(".jpg", normalized, [cv2.IMWRITE_JPEG_QUALITY, quality])
     return buf.tobytes() if ok else None
 
@@ -147,7 +159,7 @@ def _ransac_homography(kp1, kp2, good):
     return homography
 
 
-def align_to_reference(reference_bytes: bytes, current_bytes: bytes, max_scale_shift_pct: float = 25.0) -> "tuple[bytes, bool]":
+def align_to_reference(reference_bytes: bytes, current_bytes: bytes, max_scale_shift_pct: float = MAX_ALIGN_SCALE_SHIFT_PCT) -> "tuple[bytes, bool]":
     """Warp `current` onto the same framing as `reference` -- same ORB+homography
     machinery as compare_photos, reused rather than duplicated. Targets the
     single largest measured noise source (see CAPTURE_NOISE_FLOOR's docstring:
@@ -155,10 +167,10 @@ def align_to_reference(reference_bytes: bytes, current_bytes: bytes, max_scale_s
     framing BEFORE scoring, instead of only accounting for it statistically
     after the fact.
 
-    Deliberately more conservative than compare_photos' "aligned" flag: needs
-    ALIGN_CORRECTION_MIN_MATCHES matched features (stricter than
-    MIN_ALIGN_MATCHES, which only gates a diff-heatmap/framing_note -- a
-    visual aid) AND a plausible implied scale change, since a bad warp here
+    Same confidence bar as compare_photos' "aligned" flag now uses
+    (ALIGN_CORRECTION_MIN_MATCHES matched features -- stricter than
+    MIN_ALIGN_MATCHES, which only gates whether a homography is attempted at
+    all -- AND a plausible implied scale change), since a bad warp here
     corrupts what the AI actually scores, not just a comparison image. Falls
     back to the ORIGINAL current_bytes, completely unchanged, whenever that
     bar isn't cleared -- never guesses at a correction.
@@ -199,6 +211,26 @@ def align_to_reference(reference_bytes: bytes, current_bytes: bytes, max_scale_s
     return buf.tobytes(), True
 
 
+def _scalp_roi_mask(img_bgr: np.ndarray, max_dim: int = 600) -> "np.ndarray | None":
+    """Hair/scalp classification mask for img_bgr (see _scalp_mask), at the
+    array's own size. Downscales to max_dim before k-means and resizes the
+    result back up -- this is only ever used as a coarse background-exclusion
+    gate in compare_photos, not a precision boundary, so it doesn't need
+    mark_scalp_patches' full resolution to bound the cost of running k-means
+    twice (base + current) on every comparison.
+    """
+    h, w = img_bgr.shape[:2]
+    scale = min(1.0, max_dim / max(h, w))
+    small = cv2.resize(img_bgr, (int(w * scale), int(h * scale))) if scale < 1.0 else img_bgr
+    normalized = _suppress_specular_highlights(_clahe_bgr(small))
+    mask = _scalp_mask(normalized)
+    if mask is None:
+        return None
+    if mask.shape[:2] != (h, w):
+        mask = cv2.resize(mask, (w, h), interpolation=cv2.INTER_NEAREST)
+    return mask
+
+
 def compare_photos(baseline_bytes: bytes, current_bytes: bytes) -> dict:
     """One ORB/homography pass over a baseline/current photo pair, producing both
     the visual change heatmap and the framing-consistency numbers in a single
@@ -208,12 +240,16 @@ def compare_photos(baseline_bytes: bytes, current_bytes: bytes) -> dict:
 
     Returns {"heatmap_jpeg": bytes|None, "aligned": bool, "match_count": int,
     "scale_shift_pct": float|None}. heatmap_jpeg highlights visible pixel change
-    only -- not hair count or density. aligned is False when there weren't enough
-    matched features for a reliable transform; a heatmap is still produced from
-    the resized-but-unaligned pair, so callers should surface that caveat rather
-    than presenting it as a precise comparison. scale_shift_pct is roughly how
-    much closer/farther the camera appears to have been vs baseline (e.g. 25.0
-    means ~25% more zoomed in or out); None when no homography could be computed.
+    only -- not hair count or density. aligned uses the SAME bar as
+    align_to_reference() (ALIGN_CORRECTION_MIN_MATCHES + a plausible implied
+    scale change) -- "aligned" means the same thing everywhere in the product,
+    not a looser claim just because this output is a visual aid. A heatmap is
+    still produced even when aligned is False (from the resized-but-unwarped
+    pair), so callers should surface that caveat rather than presenting it as
+    a precise comparison -- never suppress the map itself over low confidence,
+    only label it honestly. scale_shift_pct is roughly how much closer/farther
+    the camera appears to have been vs baseline (e.g. 25.0 means ~25% more
+    zoomed in or out); None when no homography could be computed.
     """
     base = _decode_bgr(baseline_bytes)
     cur = _decode_bgr(current_bytes)
@@ -230,16 +266,37 @@ def compare_photos(baseline_bytes: bytes, current_bytes: bytes) -> dict:
     homography = _ransac_homography(kp1, kp2, good)
     aligned_cur, aligned_ok, scale_shift_pct = cur, False, None
     if homography is not None:
-        aligned_cur = cv2.warpPerspective(cur, homography, (w, h))
-        aligned_ok = True
         scale = float(np.sqrt(abs(np.linalg.det(homography[:2, :2]))))
         scale_shift_pct = round(abs(scale - 1.0) * 100, 1)
+        aligned_ok = len(good) >= ALIGN_CORRECTION_MIN_MATCHES and scale_shift_pct <= MAX_ALIGN_SCALE_SHIFT_PCT
+        if aligned_ok:
+            aligned_cur = cv2.warpPerspective(cur, homography, (w, h), borderMode=cv2.BORDER_REPLICATE)
+
+    # Lighting-normalize both frames before diffing -- otherwise a lamp being
+    # on/off or a different phone's auto white-balance shows up as "change"
+    # just as strongly as real hair loss would.
+    base_norm = _clahe_bgr(base)
+    cur_norm = _clahe_bgr(aligned_cur)
 
     # Blur before diffing so single-pixel sensor/lighting noise doesn't dominate
     # the heatmap -- it should track real structural change, not grain.
-    b_blur = cv2.GaussianBlur(cv2.cvtColor(base, cv2.COLOR_BGR2GRAY), (7, 7), 0)
-    c_blur = cv2.GaussianBlur(cv2.cvtColor(aligned_cur, cv2.COLOR_BGR2GRAY), (7, 7), 0)
+    b_blur = cv2.GaussianBlur(cv2.cvtColor(base_norm, cv2.COLOR_BGR2GRAY), (7, 7), 0)
+    c_blur = cv2.GaussianBlur(cv2.cvtColor(cur_norm, cv2.COLOR_BGR2GRAY), (7, 7), 0)
     diff = cv2.GaussianBlur(cv2.absdiff(b_blur, c_blur), (15, 15), 0)
+
+    # Confine the diff to wherever EITHER photo actually shows hair or scalp --
+    # without this, a shirt color, background, or facial change lights up
+    # exactly like real hair change would, which is a large part of why these
+    # maps used to look like unreadable color blobs. Falls back to the
+    # unmasked (but still lighting-normalized) diff if the classifier can't
+    # run on one of the frames, rather than losing the map entirely over it.
+    base_mask = _scalp_roi_mask(base_norm)
+    cur_mask = _scalp_roi_mask(cur_norm)
+    if base_mask is not None and cur_mask is not None:
+        roi = cv2.bitwise_or(base_mask, cur_mask)
+        roi = cv2.dilate(roi, np.ones((15, 15), np.uint8))  # slack around the classifier's own boundary error
+        diff = cv2.bitwise_and(diff, diff, mask=roi)
+
     diff = cv2.normalize(diff, None, 0, 255, cv2.NORM_MINMAX).astype(np.uint8)
 
     heat = cv2.applyColorMap(diff, cv2.COLORMAP_JET)
@@ -290,6 +347,56 @@ def _suppress_specular_highlights(img, v_thresh: float = 0.85, s_thresh: float =
     return cv2.cvtColor(hsv.astype(np.uint8), cv2.COLOR_HSV2BGR)
 
 
+def _scalp_mask(cluster_img: np.ndarray) -> "np.ndarray | None":
+    """K-means (k=3: hair / scalp-skin / other) color classification, shared by
+    mark_scalp_patches (rendered as a red-tinted visual overlay) and
+    compare_photos (diffed between baseline and current to build the visual
+    change map's region-of-interest gate). `cluster_img` must already be
+    lighting-normalized and specular-suppressed by the caller -- this only
+    does the classification math. Treats the darkest cluster as "hair" --
+    true for most hair colors against scalp/skin, but breaks down for
+    gray/blonde hair on fair skin, a known, unresolved limitation.
+
+    Requires a SUBSTANTIAL margin, not just any margin: k-means normally
+    assigns every pixel to its nearest of the 3 cluster centers, so a pixel
+    sitting almost exactly on the boundary between "hair" and "scalp" gets
+    fully classified as scalp even when the color evidence barely favors it
+    -- exactly the shape of a subtle brightness gradient across otherwise-
+    uniform hair, not a real hair/scalp transition. A pixel only counts as
+    scalp if it's closer to a non-hair cluster than to the hair cluster by
+    more than SCALP_MARGIN_MIN (see that constant's docstring for how it was
+    calibrated).
+
+    Returns a uint8 0/255 mask at cluster_img's own size, or None if there
+    aren't enough pixels to cluster meaningfully.
+    """
+    h, w = cluster_img.shape[:2]
+    pixels = cluster_img.reshape(-1, 3).astype(np.float32)
+    if len(pixels) < 50:
+        return None
+    k = 3
+    criteria = (cv2.TERM_CRITERIA_EPS + cv2.TERM_CRITERIA_MAX_ITER, 20, 0.5)
+    _, _, centers = cv2.kmeans(pixels, k, None, criteria, 3, cv2.KMEANS_PP_CENTERS)
+    hair_cluster = int(np.argmin(centers.sum(axis=1)))
+    other_idxs = [i for i in range(k) if i != hair_cluster]
+
+    # Real per-pixel distances to every center, not just cv2.kmeans' own
+    # nearest-center labels -- needed to measure HOW MUCH closer a pixel is
+    # to a non-hair cluster than to hair, not just which one wins.
+    dists = np.stack([np.linalg.norm(pixels - centers[i], axis=1) for i in range(k)], axis=1)
+    dist_hair = dists[:, hair_cluster]
+    dist_nearest_other = np.min(dists[:, other_idxs], axis=1)
+    margin = dist_hair - dist_nearest_other
+    scalp_mask = (margin > SCALP_MARGIN_MIN).astype(np.uint8).reshape(h, w) * 255
+
+    # Morphological open+close to clear speckle noise into coherent patches --
+    # "patches" implies contiguous areas, not a salt-and-pepper pixel scatter.
+    kernel = np.ones((5, 5), np.uint8)
+    scalp_mask = cv2.morphologyEx(scalp_mask, cv2.MORPH_OPEN, kernel)
+    scalp_mask = cv2.morphologyEx(scalp_mask, cv2.MORPH_CLOSE, kernel)
+    return scalp_mask
+
+
 def mark_scalp_patches(image_bytes: bytes, max_dim: int = 800) -> "bytes | None":
     """Highlight areas of a hair/scalp photo that color-clustering identifies as
     scalp-colored rather than hair-colored, tinted red. Purely a visual aid for
@@ -312,15 +419,9 @@ def mark_scalp_patches(image_bytes: bytes, max_dim: int = 800) -> "bytes | None"
        so a reflection doesn't get misread as scalp the way real exposed
        scalp would.
 
-    On top of that, the classification itself requires a SUBSTANTIAL margin,
-    not just any margin: k-means normally assigns every pixel to its nearest
-    of the 3 cluster centers, so a pixel sitting almost exactly on the
-    boundary between "hair" and "scalp" gets fully classified as scalp even
-    when the color evidence barely favors it -- exactly the shape of a
-    subtle brightness gradient across otherwise-uniform hair, not a real
-    hair/scalp transition. A pixel only counts as scalp if it's closer to a
-    non-hair cluster than to the hair cluster by more than SCALP_MARGIN_MIN
-    (see that constant's docstring for how it was calibrated).
+    The classification itself (margin-gated k-means) is shared with
+    compare_photos' change-map ROI gate -- see _scalp_mask's docstring for
+    how the margin requirement works.
 
     No background/ROI restriction: a face-based version was tried and
     removed for unreliably returning "face not found" on scalp photos; a
@@ -354,29 +455,9 @@ def mark_scalp_patches(image_bytes: bytes, max_dim: int = 800) -> "bytes | None"
 
     cluster_img = _suppress_specular_highlights(cluster_img)
 
-    pixels = cluster_img.reshape(-1, 3).astype(np.float32)
-    if len(pixels) < 50:
+    scalp_mask = _scalp_mask(cluster_img)
+    if scalp_mask is None:
         return None
-    k = 3
-    criteria = (cv2.TERM_CRITERIA_EPS + cv2.TERM_CRITERIA_MAX_ITER, 20, 0.5)
-    _, _, centers = cv2.kmeans(pixels, k, None, criteria, 3, cv2.KMEANS_PP_CENTERS)
-    hair_cluster = int(np.argmin(centers.sum(axis=1)))
-    other_idxs = [i for i in range(k) if i != hair_cluster]
-
-    # Real per-pixel distances to every center, not just cv2.kmeans' own
-    # nearest-center labels -- needed to measure HOW MUCH closer a pixel is
-    # to a non-hair cluster than to hair, not just which one wins.
-    dists = np.stack([np.linalg.norm(pixels - centers[i], axis=1) for i in range(k)], axis=1)
-    dist_hair = dists[:, hair_cluster]
-    dist_nearest_other = np.min(dists[:, other_idxs], axis=1)
-    margin = dist_hair - dist_nearest_other
-    scalp_mask = (margin > SCALP_MARGIN_MIN).astype(np.uint8).reshape(h, w) * 255
-
-    # Morphological open+close to clear speckle noise into coherent patches --
-    # "patches" implies contiguous areas, not a salt-and-pepper pixel scatter.
-    kernel = np.ones((5, 5), np.uint8)
-    scalp_mask = cv2.morphologyEx(scalp_mask, cv2.MORPH_OPEN, kernel)
-    scalp_mask = cv2.morphologyEx(scalp_mask, cv2.MORPH_CLOSE, kernel)
 
     red_layer = np.zeros_like(img)
     red_layer[:] = (0, 0, 255)  # BGR red

@@ -829,6 +829,7 @@ async def finalize_day_analysis(user: dict, session_id: str, region: str, precis
     summary = await ai_service.generate_summary(
         metrics, previous or {}, baseline or {}, session_id,
         current_b64=visual["current_b64"], baseline_b64=visual["baseline_b64"], heatmap_b64=visual["heatmap_b64"],
+        framing_note=visual.get("framing_note"),
     )
     density_estimate = await _compute_density_estimate(frames, session_id)
     region_insights = await _region_insights(per_region, region_storage_path, baseline, previous, session_id)
