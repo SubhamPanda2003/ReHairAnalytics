@@ -24,7 +24,10 @@ export default function Onboarding() {
         age: form.age ? parseInt(form.age) : null,
         gender: form.gender || null,
         hair_type: form.hair_type || null,
-        treatment_status: form.treatment_status || null,
+        // Left blank -> assume "treatment" rather than null, so the dashboard's
+        // personalized "is it working" copy still applies to anyone who skips
+        // this question instead of falling back to generic wording for them.
+        treatment_status: form.treatment_status || "treatment",
         goals: form.goals || null,
         phone: form.phone || null,
       });

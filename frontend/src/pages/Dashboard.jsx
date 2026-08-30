@@ -20,6 +20,7 @@ const TREATMENT_LABELS = {
   finasteride: "finasteride",
   prp: "PRP treatment",
   multiple: "treatment routine",
+  treatment: "treatment",
 };
 
 const Card = ({ children, className = "", delay = 0, ...rest }) => (
