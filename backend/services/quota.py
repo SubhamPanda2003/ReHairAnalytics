@@ -13,7 +13,7 @@ from models.database import db
 SETTINGS_ID = "global"
 
 DEFAULT_SETTINGS = {
-    "default_scan_limit": None,  # None = unlimited
+    "default_scan_limit": 10,
     "exhausted_message": "You've used all your available scans.",
     "whatsapp_number": "+91 6281482850",
 }
