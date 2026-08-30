@@ -14,7 +14,7 @@ import { Activity, ArrowRight } from "lucide-react";
 export default function Onboarding() {
   const navigate = useNavigate();
   const { checkAuth } = useAuth();
-  const [form, setForm] = useState({ age: "", gender: "", hair_type: "", goals: "", phone: "" });
+  const [form, setForm] = useState({ age: "", gender: "", hair_type: "", treatment_status: "", goals: "", phone: "" });
   const [saving, setSaving] = useState(false);
 
   const save = async () => {
@@ -24,6 +24,7 @@ export default function Onboarding() {
         age: form.age ? parseInt(form.age) : null,
         gender: form.gender || null,
         hair_type: form.hair_type || null,
+        treatment_status: form.treatment_status || null,
         goals: form.goals || null,
         phone: form.phone || null,
       });
@@ -44,8 +45,8 @@ export default function Onboarding() {
         <div className="w-11 h-11 rounded-xl bg-primary flex items-center justify-center mb-5">
           <Activity className="w-6 h-6 text-primary-foreground" />
         </div>
-        <h1 className="font-heading text-2xl font-bold tracking-tight">Set up your profile</h1>
-        <p className="text-muted-foreground text-sm mt-1.5 mb-7">This helps contextualize your measurements. Everything is optional.</p>
+        <h1 className="font-heading text-2xl font-bold tracking-tight">Before we start tracking</h1>
+        <p className="text-muted-foreground text-sm mt-1.5 mb-7">This is what lets us tell you whether what you're doing is actually working. Everything is optional.</p>
 
         <div className="space-y-5">
           <div className="grid grid-cols-2 gap-4">
@@ -81,6 +82,20 @@ export default function Onboarding() {
                 <SelectItem value="wavy">Wavy</SelectItem>
                 <SelectItem value="curly">Curly</SelectItem>
                 <SelectItem value="coily">Coily</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+          <div>
+            <Label className="text-xs uppercase tracking-wider text-muted-foreground">What are you currently doing about it?</Label>
+            <Select value={form.treatment_status} onValueChange={(v) => setForm({ ...form, treatment_status: v })}>
+              <SelectTrigger className="mt-1.5 rounded-xl" data-testid="onboarding-treatment"><SelectValue placeholder="Select" /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="none">Nothing yet</SelectItem>
+                <SelectItem value="minoxidil">Minoxidil</SelectItem>
+                <SelectItem value="finasteride">Finasteride</SelectItem>
+                <SelectItem value="prp">PRP / clinical treatment</SelectItem>
+                <SelectItem value="multiple">Multiple treatments</SelectItem>
+                <SelectItem value="prefer_not">Prefer not to say</SelectItem>
               </SelectContent>
             </Select>
           </div>

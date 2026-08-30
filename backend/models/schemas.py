@@ -23,6 +23,7 @@ class ProfileIn(BaseModel):
     gender: Optional[str] = None
     hair_type: Optional[str] = None
     goals: Optional[str] = None
+    treatment_status: Optional[str] = None
     reminder_enabled: Optional[bool] = None
     reminder_day: Optional[str] = None
     # Contact info, not hair-tracking context -- stored on the user doc

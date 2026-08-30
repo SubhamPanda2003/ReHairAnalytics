@@ -15,6 +15,13 @@ import TrendBadge from "@/components/TrendBadge";
 const fetchProgress = async () => (await api.get("/progress")).data;
 const fetchTimeline = async () => (await api.get("/timeline")).data;
 
+const TREATMENT_LABELS = {
+  minoxidil: "minoxidil",
+  finasteride: "finasteride",
+  prp: "PRP treatment",
+  multiple: "treatment routine",
+};
+
 const Card = ({ children, className = "", delay = 0, ...rest }) => (
   <motion.div initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }} transition={{ delay }}
     className={`rounded-2xl border border-border bg-card p-6 ${className}`} {...rest}>{children}</motion.div>
@@ -31,6 +38,11 @@ export default function Dashboard() {
   const latest = progress?.latest;
   const latestSession = timeline?.[timeline.length - 1];
   const latestImg = latestSession?.images?.[0];
+
+  const treatmentLabel = TREATMENT_LABELS[user?.profile?.treatment_status];
+  const subhead = treatmentLabel
+    ? `Tracking whether your ${treatmentLabel} is actually working.`
+    : "Objective tracking, so you know before it's obvious in the mirror.";
 
   const reminderOn = !!user?.profile?.reminder_enabled;
   const daysSince = progress?.days_since_last;
@@ -49,7 +61,7 @@ export default function Dashboard() {
         <div className="flex flex-wrap items-end justify-between gap-4 mb-8">
           <div>
             <h1 className="font-heading text-3xl font-bold tracking-tight">Your progress</h1>
-            <p className="text-muted-foreground mt-1">Objective measurements from your weekly scans.</p>
+            <p className="text-muted-foreground mt-1">{subhead}</p>
           </div>
           <Button onClick={() => navigate("/upload")} className="rounded-full h-11 px-6" data-testid="dashboard-upload-btn">
             <Camera className="w-4 h-4 mr-1.5" /> New scan
@@ -96,10 +108,10 @@ export default function Dashboard() {
             <div className="w-14 h-14 rounded-2xl bg-accent flex items-center justify-center mx-auto mb-4">
               <Camera className="w-7 h-7 text-accent-foreground" />
             </div>
-            <h2 className="font-heading text-xl font-semibold">Capture your baseline</h2>
-            <p className="text-muted-foreground mt-2 max-w-md mx-auto">Upload your first set of scalp photos to establish a baseline. Every future scan compares against it.</p>
+            <h2 className="font-heading text-xl font-semibold">Get your baseline reading</h2>
+            <p className="text-muted-foreground mt-2 max-w-md mx-auto">Upload your first set of scalp photos. Every future scan compares against this one, so you'll know exactly what's changed — not just guess.</p>
             <Button onClick={() => navigate("/upload")} className="rounded-full mt-6" data-testid="empty-upload-btn">
-              Start tracking <ArrowRight className="w-4 h-4 ml-1" />
+              Get My First Reading <ArrowRight className="w-4 h-4 ml-1" />
             </Button>
           </Card>
         ) : (

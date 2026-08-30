@@ -13,10 +13,10 @@ const login = () => {
 };
 
 const features = [
-  { icon: Ruler, title: "Objective Measurement", desc: "AI estimates density, coverage and hairline position on a consistent 0–100 scale." },
-  { icon: LineChart, title: "Trends Over Time", desc: "Interactive charts turn each weekly scan into a clear, comparable milestone." },
-  { icon: Sparkles, title: "Plain-Language Insights", desc: "A concise, non-diagnostic summary explains exactly what changed between photos." },
-  { icon: BadgeCheck, title: "Expert-Reviewed", desc: "Opt in anytime to have a real hair coach personally check your report — a second set of eyes, not just an algorithm." },
+  { icon: Ruler, title: "A Number, Not a Feeling", desc: "AI estimates density, coverage and hairline position on a consistent 0–100 scale — so \"I think it's thinner\" becomes something you can actually act on." },
+  { icon: LineChart, title: "Catch It Before the Mirror Does", desc: "Weekly scans surface small changes months before they're obvious in person, so you find out early enough to still do something." },
+  { icon: Sparkles, title: "What Changed, And Where", desc: "A concise, non-diagnostic summary explains exactly what moved — crown, hairline, temples — not just one vague score." },
+  { icon: BadgeCheck, title: "A Real Second Opinion", desc: "Opt in anytime to have a real hair coach personally check your report before you decide anything — a second set of eyes, not just an algorithm." },
 ];
 
 const privacyPoints = [
@@ -26,11 +26,11 @@ const privacyPoints = [
 ];
 
 const steps = [
-  { n: "01", t: "Create your profile", d: "Tell us your hair type and goals in under a minute." },
-  { n: "02", t: "Capture your baseline", d: "Upload front, top, left, right & back scalp photos." },
-  { n: "03", t: "Track weekly", d: "Re-shoot each week using the alignment guide." },
-  { n: "04", t: "Watch the trend", d: "Compare against baseline and read your AI summary." },
-  { n: "05", t: "Consult a dermatologist", d: "When you're ready, book a real consultation and bring your trend with you." },
+  { n: "01", t: "Tell us where you're starting", d: "Hair type, goals, and what you're already doing about it — under a minute." },
+  { n: "02", t: "Get your baseline reading", d: "Front, top, left, right & back — one full scalp reading to measure everything against." },
+  { n: "03", t: "Re-scan weekly, no guessing", d: "The alignment guide keeps every photo comparable, so it's hair vs. hair, not lighting vs. lighting." },
+  { n: "04", t: "Get your verdict", d: "See if you're improving, holding steady, or still declining — region by region, not one fuzzy score." },
+  { n: "05", t: "Bring the evidence to a dermatologist", d: "Skip \"I think it's worse\" — show up with real data and get a decision made faster." },
 ];
 
 export default function Landing() {
@@ -71,30 +71,30 @@ export default function Landing() {
         <div className="max-w-7xl mx-auto px-5 md:px-8 pt-20 pb-24 md:pt-28 md:pb-32 grid lg:grid-cols-12 gap-10 items-center">
           <motion.div initial={{ opacity: 0, y: 24 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.6 }} className="lg:col-span-7">
             <div className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full bg-accent text-accent-foreground text-xs font-semibold mb-4">
-              <ShieldCheck className="w-3.5 h-3.5" /> Objective tracking · Not a medical diagnosis
+              <Stethoscope className="w-3.5 h-3.5" /> For people already treating hair loss
             </div>
             <div className="flex items-center gap-2 text-xs font-semibold text-muted-foreground mb-6">
               <span className="text-foreground">Track</span>
               <ArrowRight className="w-3 h-3" />
               <span className="text-foreground">Measure</span>
               <ArrowRight className="w-3 h-3" />
-              <span className="text-foreground">Connect</span>
+              <span className="text-foreground">Decide</span>
             </div>
             <h1 className="font-heading text-4xl sm:text-5xl lg:text-6xl font-bold tracking-tighter leading-[1.05]">
-              Track your hair.<br /><span className="text-primary">Measure</span> your progress.
+              Is your treatment<br /><span className="text-primary">actually working?</span>
             </h1>
             <p className="mt-6 text-base md:text-lg text-muted-foreground max-w-xl leading-relaxed">
-              Turn your hair-loss journey into measurable progress with standardized photos and longitudinal tracking — then bring your trend to a real dermatologist when you're ready to act on it.
+              Minoxidil, finasteride, PRP — you can't tell from the mirror, and finding out six months too late is expensive. Get an objective reading every week, and real evidence to bring to a dermatologist.
             </p>
             <div className="mt-8 flex flex-wrap items-center gap-3">
               <Button size="lg" onClick={login} data-testid="hero-cta-btn" className="rounded-full h-12 px-7 text-base">
-                Start Tracking Free <ArrowRight className="w-4 h-4 ml-1" />
+                Get My First Reading <ArrowRight className="w-4 h-4 ml-1" />
               </Button>
               <Button size="lg" variant="outline" onClick={login} data-testid="hero-consult-btn" className="rounded-full h-12 px-7 text-base">
-                <Stethoscope className="w-4 h-4 mr-1.5" /> Find a Dermatologist
+                <Stethoscope className="w-4 h-4 mr-1.5" /> Talk to a Dermatologist
               </Button>
             </div>
-            <p className="mt-3 text-sm text-muted-foreground">500+ scans tracked so far · No credit card · Google sign-in</p>
+            <p className="mt-3 text-sm text-muted-foreground">500+ scans tracked so far · Not a medical diagnosis · No credit card</p>
           </motion.div>
 
           <motion.div initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }} transition={{ duration: 0.7, delay: 0.1 }} className="lg:col-span-5">
@@ -119,10 +119,10 @@ export default function Landing() {
 
       {/* Sample report */}
       <section className="max-w-7xl mx-auto px-5 md:px-8 py-10 text-center">
-        <p className="text-muted-foreground mb-3">Curious what a real report looks like?</p>
+        <p className="text-muted-foreground mb-3">See what a real verdict looks like on paper.</p>
         <a href="/sample-report.pdf" download="ReHairAnalytics-Sample-Report.pdf" data-testid="sample-report-download">
           <Button size="lg" variant="outline" className="rounded-full h-12 px-7 text-base">
-            <Download className="w-4 h-4 mr-1.5" /> Download sample report
+            <Download className="w-4 h-4 mr-1.5" /> Download sample reading
           </Button>
         </a>
       </section>
@@ -155,11 +155,11 @@ export default function Landing() {
         <div className="max-w-7xl mx-auto px-5 md:px-8 py-20">
           <div className="text-center max-w-2xl mx-auto mb-12">
             <div className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full bg-accent text-accent-foreground text-xs font-semibold mb-4">
-              <Camera className="w-3.5 h-3.5" /> Our core differentiator
+              <Camera className="w-3.5 h-3.5" /> Why the verdict holds up
             </div>
-            <h2 className="font-heading text-2xl sm:text-3xl lg:text-4xl font-semibold tracking-tight mb-3">Same conditions. Meaningful comparisons.</h2>
+            <h2 className="font-heading text-2xl sm:text-3xl lg:text-4xl font-semibold tracking-tight mb-3">Same conditions. A verdict you can trust.</h2>
             <p className="text-muted-foreground leading-relaxed">
-              Hair photos can look dramatically different because of lighting, angle, distance and hairstyle. ReHairAnalytics guides you to capture standardized images so your measurements are more comparable over time.
+              Hair photos can look dramatically different because of lighting, angle, distance and hairstyle — which is how people end up arguing with themselves in the mirror for months. ReHairAnalytics guides you to capture standardized images so the answer holds up, not just a feeling.
             </p>
           </div>
           <div className="grid sm:grid-cols-2 gap-6 max-w-3xl mx-auto">
@@ -207,8 +207,8 @@ export default function Landing() {
 
       {/* Features */}
       <section className="max-w-7xl mx-auto px-5 md:px-8 py-20">
-        <h2 className="font-heading text-2xl sm:text-3xl lg:text-4xl font-semibold tracking-tight mb-3">Built for consistency</h2>
-        <p className="text-muted-foreground max-w-2xl mb-12">Everything you need to measure change reliably — the enemy of accurate tracking is inconsistency, so we designed around it.</p>
+        <h2 className="font-heading text-2xl sm:text-3xl lg:text-4xl font-semibold tracking-tight mb-3">Built to answer one question</h2>
+        <p className="text-muted-foreground max-w-2xl mb-12">"Is it working?" Everything below exists to answer that reliably — the enemy of a trustworthy answer is inconsistency, so we designed around it.</p>
         <div className="grid md:grid-cols-2 lg:grid-cols-4 gap-6">
           {features.map((f, i) => (
             <motion.div key={f.title} initial={{ opacity: 0, y: 20 }} whileInView={{ opacity: 1, y: 0 }} viewport={{ once: true }} transition={{ delay: i * 0.05 }}
@@ -227,7 +227,7 @@ export default function Landing() {
       <section className="bg-secondary/50 border-y border-border">
         <div className="max-w-7xl mx-auto px-5 md:px-8 py-20">
           <div className="flex items-center gap-2 mb-3"><Clock className="w-5 h-5 text-primary" /><span className="text-xs uppercase tracking-[0.2em] font-semibold text-muted-foreground">How it works</span></div>
-          <h2 className="font-heading text-2xl sm:text-3xl lg:text-4xl font-semibold tracking-tight mb-12">Five steps, from first photo to expert opinion</h2>
+          <h2 className="font-heading text-2xl sm:text-3xl lg:text-4xl font-semibold tracking-tight mb-12">Five steps to a straight answer</h2>
           <div className="grid sm:grid-cols-2 lg:grid-cols-5 gap-6">
             {steps.map((s) => (
               <div key={s.n} className="rounded-2xl bg-card border border-border p-6">
