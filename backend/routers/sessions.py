@@ -248,10 +248,11 @@ async def analyze_session(session_id: str, user: CurrentUser):
     metrics, spread = await sessions_service.ensemble_score(b64, primary["view"], "full", session_id, first_call)
 
     baseline, previous = await sessions_service.get_baseline_and_previous(user["user_id"], session_id)
-    visual = await sessions_service.compute_visual_context(user["user_id"], session_id, primary["storage_path"], current_bytes=data)
+    visual = await sessions_service.compute_visual_context(user["user_id"], session_id)
     summary = await ai_service.generate_summary(
         metrics, previous or {}, baseline or {}, session_id,
         current_b64=visual["current_b64"], baseline_b64=visual["baseline_b64"], heatmap_b64=visual["heatmap_b64"],
+        framing_note=visual.get("framing_note"), region_photos=visual.get("region_photos"),
     )
 
     avg_quality = int(sum(i["quality_score"] for i in images) / len(images))

@@ -355,6 +355,15 @@ def best_per_region(images: list[dict]) -> dict:
     return best
 
 
+async def _best_per_region_pair(session_a_id: str, session_b_id: str):
+    """Fetches both sessions' images once and indexes each by region -- the
+    shared first step behind matched_best_images (single best-shared-region
+    pick) and matched_images_for_regions (specific named regions)."""
+    imgs_a = await db.images.find({"tracking_session_id": session_a_id}, {"_id": 0}).to_list(200)
+    imgs_b = await db.images.find({"tracking_session_id": session_b_id}, {"_id": 0}).to_list(200)
+    return imgs_a, imgs_b, best_per_region(imgs_a), best_per_region(imgs_b)
+
+
 async def matched_best_images(session_a_id: str, session_b_id: str) -> dict:
     """Best photo from each session for a side-by-side comparison, picked from
     the SAME region when both sessions captured one -- comparing session A's
@@ -368,10 +377,7 @@ async def matched_best_images(session_a_id: str, session_b_id: str) -> dict:
     "matched": bool}. matched=False means the fallback ran and the pair may show
     different regions -- callers should caveat that in the UI.
     """
-    imgs_a = await db.images.find({"tracking_session_id": session_a_id}, {"_id": 0}).to_list(200)
-    imgs_b = await db.images.find({"tracking_session_id": session_b_id}, {"_id": 0}).to_list(200)
-    by_region_a = best_per_region(imgs_a)
-    by_region_b = best_per_region(imgs_b)
+    imgs_a, imgs_b, by_region_a, by_region_b = await _best_per_region_pair(session_a_id, session_b_id)
     shared = [r for r in REGION_ORDER if r in by_region_a and r in by_region_b]
     if shared:
         region = "front" if "front" in shared else shared[0]
@@ -391,54 +397,139 @@ async def matched_best_images(session_a_id: str, session_b_id: str) -> dict:
     }
 
 
+async def matched_images_for_regions(session_a_id: str, session_b_id: str, regions: list[str]) -> dict:
+    """Best photo from each session for EACH of `regions`, from that SAME
+    region in both sessions (same reasoning as matched_best_images) -- unlike
+    matched_best_images, which returns only its single preferred region, this
+    returns every one of `regions` that both sessions actually share. Used to
+    give the AI insight front (hairline) AND crown (vertex) together when
+    both were captured -- the two regions pattern hair loss is actually
+    staged on -- instead of just whichever one region a single-pick function
+    happens to prefer.
+
+    Returns {region: {"a_path": str, "b_path": str}}, only for regions
+    present in BOTH sessions -- a region missing from either side is simply
+    omitted, not an error.
+    """
+    _, _, by_region_a, by_region_b = await _best_per_region_pair(session_a_id, session_b_id)
+    return {
+        r: {"a_path": by_region_a[r]["storage_path"], "b_path": by_region_b[r]["storage_path"]}
+        for r in regions if r in by_region_a and r in by_region_b
+    }
+
+
 async def get_baseline_session_id(user_id: str) -> Optional[str]:
     first = await db.tracking_sessions.find({"user_id": user_id}, {"_id": 0, "id": 1}).sort("date", 1).to_list(1)
     return first[0]["id"] if first else None
 
 
-async def compute_visual_context(
-    user_id: str, session_id: str, current_image_path: Optional[str], current_bytes: Optional[bytes] = None,
-) -> dict:
+# Front (hairline recession) and crown (vertex thinning) are the two regions
+# pattern hair loss is actually staged on -- the AI insight should see both
+# when captured, not just whichever single region happened to be picked.
+INSIGHT_COMPARISON_REGIONS = ["front", "crown"]
+
+
+async def compute_visual_context(user_id: str, session_id: str) -> dict:
     """Everything generate_summary() needs to give real, photo-grounded insight
-    instead of only reciting score deltas: base64-encoded current/baseline
-    photos, a change-map heatmap between them, and the framing-consistency
-    numbers -- all from a single ORB/homography pass (image_utils.compare_photos)
-    against the baseline's representative photo. Computed once at analysis time
-    (not per page view); the analysis doc only stores framing_note (JSON-safe),
-    the image data is used in-memory for the LLM call and discarded.
+    instead of only reciting score deltas: base64-encoded photo pairs for
+    front AND crown (see INSIGHT_COMPARISON_REGIONS) when both were captured,
+    a change-map heatmap, and the framing-consistency numbers -- all from a
+    single ORB/homography pass (image_utils.compare_photos) on the primary
+    (front-preferred) pair.
+
+    Every photo pair is picked from the SAME region in both sessions (via
+    matched_images_for_regions/matched_best_images) -- each session's
+    independent best-overall photo used to be picked separately here, which
+    could silently compare e.g. today's back photo against the baseline's
+    front photo whenever a different region happened to score highest in
+    each session. Falls back to each session's independent best photo only
+    when NEITHER front nor crown is shared, flagged via region_matched=False
+    so callers/prompts can hedge accordingly.
+
+    Computed once at analysis time (not per page view); the analysis doc only
+    stores framing_note (JSON-safe), the image data is used in-memory for the
+    LLM call and discarded.
 
     Returns {"framing_note": dict|None, "current_b64": str|None,
-    "baseline_b64": str|None, "heatmap_b64": str|None}. Degrades to fewer/no
-    images on any failure (no baseline yet, storage unavailable, CV failure) --
-    this must never block finalizing a scan.
+    "baseline_b64": str|None, "heatmap_b64": str|None, "region_photos":
+    list[dict]}. The flat current_b64/baseline_b64/heatmap_b64/framing_note
+    fields mirror the FIRST successfully-fetched region_photos entry (front
+    preferred) -- unchanged shape for the stored analysis doc and the Results
+    page's existing framing-caveat banner. region_photos is
+    [{"region": str, "current_b64": str, "baseline_b64": str}, ...], one
+    entry per region actually shared between baseline and current (both,
+    either, or -- via the matched_best_images fallback -- one unmatched
+    pair). Degrades to fewer/no images on any failure (no baseline yet,
+    storage unavailable, CV failure) -- this must never block finalizing a
+    scan.
     """
-    result = {"framing_note": None, "current_b64": None, "baseline_b64": None, "heatmap_b64": None}
-    if not current_image_path:
-        return result
-    try:
-        if current_bytes is None:
-            current_bytes, _ = await asyncio.to_thread(store.get_object, current_image_path)
-        result["current_b64"] = await asyncio.to_thread(image_utils.to_base64_jpeg, current_bytes)
-    except Exception:
-        return result
+    result = {"framing_note": None, "current_b64": None, "baseline_b64": None, "heatmap_b64": None, "region_photos": []}
 
     baseline_id = await get_baseline_session_id(user_id)
     if not baseline_id or baseline_id == session_id:
+        # No distinct baseline yet -- nothing to region-match against, just
+        # show the current photo alone.
+        current_path = await best_image_path(session_id)
+        if not current_path:
+            return result
+        try:
+            current_bytes, _ = await asyncio.to_thread(store.get_object, current_path)
+            result["current_b64"] = await asyncio.to_thread(image_utils.to_base64_jpeg, current_bytes)
+        except Exception:
+            pass
         return result
-    baseline_path = await best_image_path(baseline_id)
-    if not baseline_path:
-        return result
-    try:
-        baseline_bytes, _ = await asyncio.to_thread(store.get_object, baseline_path)
-        result["baseline_b64"] = await asyncio.to_thread(image_utils.to_base64_jpeg, baseline_bytes)
-        cmp = await asyncio.to_thread(image_utils.compare_photos, baseline_bytes, current_bytes)
-        result["framing_note"] = {
-            "aligned": cmp["aligned"], "match_count": cmp["match_count"], "scale_shift_pct": cmp["scale_shift_pct"],
-        }
-        if cmp["heatmap_jpeg"]:
-            result["heatmap_b64"] = base64.b64encode(cmp["heatmap_jpeg"]).decode()
-    except Exception:
-        pass
+
+    region_pairs = await matched_images_for_regions(baseline_id, session_id, INSIGHT_COMPARISON_REGIONS)
+    region_matched = True
+    if not region_pairs:
+        # Neither front nor crown was shared -- fall back to comparing
+        # whatever's available so there's still SOMETHING, same
+        # graceful-degradation philosophy as everywhere else in this file.
+        matched = await matched_best_images(baseline_id, session_id)
+        region_matched = matched["matched"]
+        if matched["a_path"] and matched["b_path"]:
+            # matched["region"] is None here (that's what "no shared region"
+            # means) -- keep it None rather than a placeholder string like
+            # "photo", so generate_summary can tell "no real region name"
+            # apart from an actual region and phrase its image labels cleanly.
+            region_pairs = {matched["region"]: {"a_path": matched["a_path"], "b_path": matched["b_path"]}}
+
+    # Front/crown in their preferred order first, then any other region
+    # (only possible via the single-region fallback above), each once.
+    ordered_regions = [r for r in INSIGHT_COMPARISON_REGIONS if r in region_pairs]
+    ordered_regions += [r for r in region_pairs if r not in ordered_regions]
+
+    for region in ordered_regions:
+        paths = region_pairs[region]
+        try:
+            current_bytes, _ = await asyncio.to_thread(store.get_object, paths["b_path"])
+            baseline_bytes, _ = await asyncio.to_thread(store.get_object, paths["a_path"])
+            entry = {
+                "region": region,
+                "current_b64": await asyncio.to_thread(image_utils.to_base64_jpeg, current_bytes),
+                "baseline_b64": await asyncio.to_thread(image_utils.to_base64_jpeg, baseline_bytes),
+            }
+        except Exception:
+            continue
+        result["region_photos"].append(entry)
+
+        if result["current_b64"] is None:
+            # Drive the flat backward-compatible fields off the FIRST region
+            # that actually resolved -- still real photo bytes, so the CV
+            # comparison and stored framing_note stay meaningful.
+            result["current_b64"] = entry["current_b64"]
+            result["baseline_b64"] = entry["baseline_b64"]
+            try:
+                cmp = await asyncio.to_thread(image_utils.compare_photos, baseline_bytes, current_bytes)
+                result["framing_note"] = {
+                    "aligned": cmp["aligned"], "match_count": cmp["match_count"],
+                    "scale_shift_pct": cmp["scale_shift_pct"], "region_matched": region_matched,
+                }
+                if cmp["heatmap_jpeg"]:
+                    result["heatmap_b64"] = base64.b64encode(cmp["heatmap_jpeg"]).decode()
+            except Exception:
+                pass
+
     return result
 
 
@@ -824,12 +915,11 @@ async def finalize_day_analysis(user: dict, session_id: str, region: str, precis
         "hair_coverage_pct": avg("hair_coverage_pct"),
     }
 
-    current_best = await best_image_path(session_id)
-    visual = await compute_visual_context(user["user_id"], session_id, current_best)
+    visual = await compute_visual_context(user["user_id"], session_id)
     summary = await ai_service.generate_summary(
         metrics, previous or {}, baseline or {}, session_id,
         current_b64=visual["current_b64"], baseline_b64=visual["baseline_b64"], heatmap_b64=visual["heatmap_b64"],
-        framing_note=visual.get("framing_note"),
+        framing_note=visual.get("framing_note"), region_photos=visual.get("region_photos"),
     )
     density_estimate = await _compute_density_estimate(frames, session_id)
     region_insights = await _region_insights(per_region, region_storage_path, baseline, previous, session_id)

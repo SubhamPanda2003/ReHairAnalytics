@@ -272,7 +272,7 @@ async def analyze_metrics(
 async def generate_summary(
     current: dict, previous: dict, baseline: dict, session_id: str,
     current_b64: str = None, baseline_b64: str = None, heatmap_b64: str = None,
-    framing_note: dict = None,
+    framing_note: dict = None, region_photos: list = None,
 ) -> str:
     """Write the "AI insight" shown on Results/Report. When photo(s) are
     available, the model actually looks at them instead of only being handed
@@ -282,6 +282,15 @@ async def generate_summary(
     visual evidence agrees with the reported score movement or looks like
     normal photo-to-photo variation instead.
 
+    `region_photos` (from compute_visual_context) is a list of
+    {"region": str, "current_b64": str, "baseline_b64": str} -- when non-empty
+    it drives the images sent to the model instead of the flat current_b64/
+    baseline_b64 args (which just mirror region_photos[0]), so front
+    (hairline) and crown can both be shown and described separately instead
+    of blended into one generic statement. Falls back to the flat pair when
+    region_photos is empty (e.g. no baseline yet, so there's nothing to pair
+    by region).
+
     `framing_note` is compute_visual_context's CV-computed alignment check
     (image_utils.compare_photos' aligned/match_count/scale_shift_pct) -- fed
     in as grounding context so the model's comparability caveat is driven by
@@ -289,19 +298,22 @@ async def generate_summary(
     """
     system = (
         "You are giving a hair-tracking user genuine, specific insight into their own photos and "
-        "measurements -- not a script that recites numbers back at them. When photos are provided, "
-        "compare the current and baseline photos DIRECTLY: describe where hair looks fuller or "
-        "thinner, whether any visible change looks concentrated in one area or spread evenly, and "
-        "whether what you see agrees with the reported score movement or looks like normal "
-        "photo-to-photo variation instead. If a change-map image is also given, treat it only as a "
-        "rough supporting visual, never as ground truth -- it can be misleading when the two photos "
-        "differ in lighting, distance, or angle, so don't over-trust its colors on their own; the "
-        "real photos are the primary evidence. You'll also be told whether the photos could be "
-        "reliably aligned for comparison -- if they could NOT, say so plainly and specifically (not "
-        "a generic hedge), and be correspondingly more cautious about claiming visible change. "
-        "Never diagnose disease, never use clinical staging language, never invent a measurement you "
-        "weren't given. End with exactly one specific tip grounded in what you actually observed -- "
-        "not a generic reminder to be consistent. Keep the whole response under 130 words."
+        "measurements -- not a script that recites numbers back at them. You may be given photo pairs "
+        "for more than one scalp region (e.g. front/hairline and crown) -- describe each region's "
+        "visible change SEPARATELY and specifically, don't blend them into one generic statement. For "
+        "each region: compare its current and baseline photos DIRECTLY, describe where hair looks "
+        "fuller or thinner, and whether what you see agrees with the reported score movement or looks "
+        "like normal photo-to-photo variation instead. If a change-map image is also given, it covers "
+        "only ONE of the regions (labeled which) -- treat it as a rough supporting visual for that "
+        "region only, never as ground truth; it can be misleading when photos differ in lighting, "
+        "distance, or angle, so don't over-trust its colors on their own, the real photos are the "
+        "primary evidence. You'll also be told whether photos were reliably matched/aligned for "
+        "comparison -- if they were NOT (including if two photos turned out to be different scalp "
+        "regions entirely), say so plainly and specifically, not a generic hedge, and be "
+        "correspondingly more cautious about claiming visible change. Never diagnose disease, never "
+        "use clinical staging language, never invent a measurement you weren't given. End with exactly "
+        "one specific tip grounded in what you actually observed -- not a generic reminder to be "
+        "consistent. Keep the whole response under 150 words."
     )
 
     def diff(a, b, key):
@@ -313,17 +325,46 @@ async def generate_summary(
 
     hairline_current = current.get("hairline_score")
     hairline_current = "n/a" if hairline_current is None else hairline_current
+
     image_notes = []
-    if current_b64:
-        image_notes.append("Image 1 is today's photo.")
-    if baseline_b64:
-        image_notes.append("Image 2 is the baseline photo to compare against.")
-    if heatmap_b64:
-        image_notes.append("Image 3 is a rough change-map visual aid (aligned diff, warm = more visible change) -- a supporting hint only, not ground truth.")
+    file_contents = []
+
+    def add_image(b64: str, note: str):
+        file_contents.append(ImageContent(image_base64=b64))
+        image_notes.append(f"Image {len(file_contents)} {note}")
+
+    if region_photos:
+        for rp in region_photos:
+            region_tag = f" {rp['region']}" if rp.get("region") else ""
+            add_image(rp["current_b64"], f"is today's{region_tag} photo.")
+            if rp.get("baseline_b64"):
+                add_image(rp["baseline_b64"], f"is the baseline{region_tag} photo to compare against.")
+        if heatmap_b64:
+            primary_region = region_photos[0].get("region")
+            region_phrase = f"the {primary_region} region" if primary_region else "the primary photo pair"
+            add_image(heatmap_b64, f"is a rough change-map visual aid for {region_phrase} only (aligned diff, warm = more visible change) -- a supporting hint only, not ground truth.")
+    else:
+        if current_b64:
+            add_image(current_b64, "is today's photo.")
+        if baseline_b64:
+            add_image(baseline_b64, "is the baseline photo to compare against.")
+        if heatmap_b64:
+            add_image(heatmap_b64, "is a rough change-map visual aid (aligned diff, warm = more visible change) -- a supporting hint only, not ground truth.")
 
     framing_line = ""
     if framing_note is not None:
-        if framing_note.get("aligned"):
+        if framing_note.get("region_matched") is False:
+            # Distinct from misalignment: these two photos aren't even the same
+            # part of the scalp (e.g. baseline's best photo was "front", today's
+            # was "back") -- no amount of "different angle" hedging is the right
+            # caveat here, the comparison itself is the wrong one.
+            framing_line = (
+                "IMPORTANT: the current and baseline photos are of DIFFERENT scalp regions (the two sessions "
+                "didn't share a captured region, so this is a fallback pairing). Do not describe visible "
+                "density/coverage differences between them as if they're the same spot -- say plainly that "
+                "this comparison is between different areas and isn't a reliable basis for judging change.\n"
+            )
+        elif framing_note.get("aligned"):
             framing_line = "Photo alignment check: current and baseline were reliably aligned for comparison.\n"
         else:
             detail = []
@@ -351,13 +392,6 @@ async def generate_summary(
         + "Write the insight now: describe what you actually observe, relate it to the measurements "
         "above, and end with one specific, grounded tip."
     )
-    file_contents = []
-    if current_b64:
-        file_contents.append(ImageContent(image_base64=current_b64))
-    if baseline_b64:
-        file_contents.append(ImageContent(image_base64=baseline_b64))
-    if heatmap_b64:
-        file_contents.append(ImageContent(image_base64=heatmap_b64))
 
     try:
         chat = _new_chat(session_id, system)
